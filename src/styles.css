@@ -59,7 +59,7 @@ body {
   padding: 20px;
   background:
     linear-gradient(165deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.62)),
-    url("./assets/fpom/x-cover.png") center / cover;
+    url("../assets/fpom/x-cover.png") center / cover;
   text-align: center;
 }
 

@@ -63,11 +63,11 @@ const STATE = {
 };
 
 const images = {
-  fpom: loadImage("./assets/fpom/fpom-logo-transparent.png"),
-  cover: loadImage("./assets/fpom/x-cover.png"),
-  doge: loadImage("./assets/memes/doge.png"),
-  shiba: loadImage("./assets/memes/shiba.png"),
-  pepe: loadImage("./assets/memes/pepe-transparent.png"),
+  fpom: loadImage("../assets/fpom/fpom-logo-transparent.png"),
+  cover: loadImage("../assets/fpom/x-cover.png"),
+  doge: loadImage("../assets/memes/doge.png"),
+  shiba: loadImage("../assets/memes/shiba.png"),
+  pepe: loadImage("../assets/memes/pepe-transparent.png"),
 };
 
 const enemyTypes = ["doge", "shiba", "pepe", "doge", "shiba", "pepe"];
