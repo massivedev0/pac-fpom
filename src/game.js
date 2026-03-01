@@ -79,7 +79,8 @@ let accumulator = 0;
 
 function loadImage(src) {
   const img = new Image();
-  img.src = src;
+  // Resolve URLs relative to this module file (works on GitHub Pages subpaths).
+  img.src = new URL(src, import.meta.url).href;
   return img;
 }
 
