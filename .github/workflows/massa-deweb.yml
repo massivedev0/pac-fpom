@@ -7,6 +7,7 @@ on:
 
 env:
   GH_TOKEN: ${{ secrets.github_token }}
+  DEWEB_CLI_VERSION: 0.6.1
 
 jobs:
   release:
@@ -25,17 +26,23 @@ jobs:
       - name: Install dependencies ⚙️
         run: npm ci
 
-      - name: Prepare static build 🛠️
+      - name: Build static site 🛠️
+        run: npm run build
+
+      - name: Validate deployment secrets 🔐
+        env:
+          SECRET_KEY: ${{ secrets.MASSA_ACCOUNT_SECRET_KEY }}
+          CONTRACT_ADDRESS: ${{ secrets.MASSA_WEBSITE_CONTRACT_ADDRESS }}
         run: |
-          mkdir -p dist
-          cp -R index.html src assets dist/
+          test -n "$SECRET_KEY" || (echo "Missing secret: MASSA_ACCOUNT_SECRET_KEY" && exit 1)
+          test -n "$CONTRACT_ADDRESS" || (echo "Missing secret: MASSA_WEBSITE_CONTRACT_ADDRESS" && exit 1)
 
       - name: Upload to Massa DeWeb 🌐
         env:
           SECRET_KEY: ${{ secrets.MASSA_ACCOUNT_SECRET_KEY }}
           CONTRACT_ADDRESS: ${{ secrets.MASSA_WEBSITE_CONTRACT_ADDRESS }}
         run: |
-          npx @massalabs/deweb-cli@latest upload ./dist \
+          npx -y -p tslib -p @massalabs/deweb-cli@${DEWEB_CLI_VERSION} deweb upload ./dist \
             --node_url https://mainnet.massa.net/api/v2 \
             --address $CONTRACT_ADDRESS \
             --accept_disclaimer \
