@@ -1,16 +1,32 @@
 {
   "name": "fpom-pacman",
   "version": "1.0.0",
-  "description": "",
-  "main": "game.js",
+  "description": "FPOM Meme Hunt web game (Pac-Man style promo mini-game)",
+  "main": "src/game.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "node ./scripts/build.mjs",
+    "build:prod": "npm run build",
+    "preview": "python3 -m http.server 4178 -d dist",
+    "start": "npm run serve",
+    "serve": "python3 -m http.server 4177",
+    "test:smoke": "node \"${CODEX_HOME:-$HOME/.codex}/skills/develop-web-game/scripts/web_game_playwright_client.js\" --url http://localhost:4177 --actions-file ./tests/playwright/actions/smoke.json --iterations 1 --pause-ms 120 --screenshot-dir ./tests/playwright/artifacts/smoke"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "fpom",
+    "pacman",
+    "massa",
+    "deweb",
+    "web3",
+    "html5-game",
+    "canvas-game",
+    "meme-game",
+    "javascript"
+  ],
+  "author": "massivedev0",
   "license": "ISC",
   "type": "commonjs",
-  "dependencies": {
+  "devDependencies": {
     "playwright": "^1.58.2"
   }
 }
