@@ -1,0 +1,10 @@
+node_modules/
+output/
+.venv-imagegen/
+.DS_Store
+
+# local automation/test artifacts
+test-actions*.json
+
+# local working notes
+progress.md

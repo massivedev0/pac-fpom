@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FPOM Meme Hunt</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bungee&family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="game-shell" aria-label="FPOM game shell">
+        <canvas id="game-canvas" width="960" height="640"></canvas>
+        <div class="menu-overlay" id="menu-overlay">
+          <img class="overlay-logo" src="./assets/fpom/fpom-logo-transparent.png" alt="FPOM logo" />
+          <h1>FPOM Meme Hunt</h1>
+          <p class="subtitle">No more scams. Gimme a serious fake.</p>
+          <button id="start-btn" type="button">Start Hunt</button>
+          <p class="hint">Move: WASD / Arrows · Power hunt: eat red orbs · F: fullscreen · P: pause</p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./game.js"></script>
+  </body>
+</html>
