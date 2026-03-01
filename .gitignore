@@ -1,4 +1,5 @@
 node_modules/
+dist/
 output/
 .venv-imagegen/
 .DS_Store
