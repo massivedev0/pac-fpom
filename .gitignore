@@ -6,3 +6,6 @@ tests/playwright/artifacts/
 
 # local working notes
 .ai/
+
+# environment variables
+.env
