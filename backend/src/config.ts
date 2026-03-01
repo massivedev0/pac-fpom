@@ -1,14 +1,39 @@
-export const config = {
-  host: process.env.HOST ?? "0.0.0.0",
-  port: Number(process.env.PORT ?? 8787),
-
-  fpomContractAddress:
-    process.env.FPOM_CONTRACT_ADDRESS ??
-    "AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
-
-  payoutDryRun: String(process.env.PAYOUT_DRY_RUN ?? "true") !== "false",
-  maxClaimsPerAddress: Number(process.env.MAX_CLAIMS_PER_ADDRESS ?? 2),
-  ipClaimsPerDayLimit: Number(process.env.IP_CLAIMS_PER_DAY_LIMIT ?? 10),
-  minRunDurationMs: Number(process.env.MIN_RUN_DURATION_MS ?? 45_000),
-  maxRunDurationMs: Number(process.env.MAX_RUN_DURATION_MS ?? 900_000),
+export type AppConfig = {
+  host: string;
+  port: number;
+  fpomContractAddress: string;
+  payoutDryRun: boolean;
+  maxClaimsPerAddress: number;
+  ipClaimsPerDayLimit: number;
+  minRunDurationMs: number;
+  maxRunDurationMs: number;
+  logLevel: string;
+  prettyLogs: boolean;
 };
+
+type EnvSource = Record<string, string | undefined>;
+
+function asNumber(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  if (Number.isFinite(parsed)) {
+    return parsed;
+  }
+  return fallback;
+}
+
+export function getConfig(env: EnvSource = process.env): AppConfig {
+  return {
+    host: env.HOST ?? "0.0.0.0",
+    port: asNumber(env.PORT, 8787),
+    fpomContractAddress:
+      env.FPOM_CONTRACT_ADDRESS ??
+      "AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+    payoutDryRun: String(env.PAYOUT_DRY_RUN ?? "true") !== "false",
+    maxClaimsPerAddress: asNumber(env.MAX_CLAIMS_PER_ADDRESS, 2),
+    ipClaimsPerDayLimit: asNumber(env.IP_CLAIMS_PER_DAY_LIMIT, 10),
+    minRunDurationMs: asNumber(env.MIN_RUN_DURATION_MS, 45_000),
+    maxRunDurationMs: asNumber(env.MAX_RUN_DURATION_MS, 900_000),
+    logLevel: env.LOG_LEVEL ?? "info",
+    prettyLogs: String(env.PRETTY_LOGS ?? "true") !== "false",
+  };
+}

@@ -21,6 +21,36 @@
           <img class="overlay-logo" src="./assets/fpom/fpom-logo-transparent.png" alt="FPOM logo" />
           <h1>FPOM Meme Hunt</h1>
           <p class="subtitle">No more scams. Gimme a serious fake.</p>
+          <div id="reward-panel" class="reward-panel" hidden>
+            <p id="reward-summary" class="reward-summary">Round reward: 0 FPOM</p>
+            <label class="reward-label" for="claim-mode">Claim mode</label>
+            <select id="claim-mode" class="reward-input">
+              <option value="wallet_signature">Connect wallet (recommended)</option>
+              <option value="address_only">Address only</option>
+            </select>
+            <label class="reward-label" for="claim-address">Massa address</label>
+            <input
+              id="claim-address"
+              class="reward-input"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              placeholder="AU... / AS..."
+              maxlength="160"
+            />
+            <label class="reward-label" for="claim-signature">Signature (for wallet mode)</label>
+            <input
+              id="claim-signature"
+              class="reward-input"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              placeholder="Paste signed challenge"
+              maxlength="5000"
+            />
+            <button id="claim-btn" class="claim-btn" type="button">Claim FPOM</button>
+            <p id="claim-status" class="claim-status" role="status" aria-live="polite"></p>
+          </div>
           <button id="start-btn" type="button">Start Hunt</button>
           <p class="hint">Move: WASD / Arrows · Power hunt: eat red orbs · F: fullscreen · P: pause</p>
         </div>

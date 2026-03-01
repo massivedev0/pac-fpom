@@ -2,11 +2,21 @@ const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
 const startButton = document.getElementById("start-btn");
 const menuOverlay = document.getElementById("menu-overlay");
+const rewardPanel = document.getElementById("reward-panel");
+const rewardSummary = document.getElementById("reward-summary");
+const claimModeSelect = document.getElementById("claim-mode");
+const claimAddressInput = document.getElementById("claim-address");
+const claimSignatureInput = document.getElementById("claim-signature");
+const claimButton = document.getElementById("claim-btn");
+const claimStatus = document.getElementById("claim-status");
 
 const BASE_WIDTH = 960;
 const BASE_HEIGHT = 640;
 const TILE = 32;
 const FIXED_DT = 1 / 60;
+
+const REWARDS_API_TIMEOUT_MS = 11_000;
+const DEFAULT_LOCAL_API = "http://127.0.0.1:8787";
 
 const SCORE_VALUES = {
   // Tuned so a full clear gives ~100k points (without heavy enemy farming).
@@ -69,6 +79,18 @@ const STATE = {
   enemies: [],
   effects: [],
   roundResetTimer: 0,
+  runStats: {
+    startedAtMs: 0,
+    pelletsEaten: 0,
+    powerPelletsEaten: 0,
+    enemiesEaten: 0,
+  },
+  rewards: {
+    apiBase: "",
+    sessionId: null,
+    claimInFlight: false,
+    claimStatusText: "",
+  },
 };
 
 const images = {
@@ -91,6 +113,118 @@ function loadImage(src) {
   // Resolve URLs relative to this module file (works on GitHub Pages subpaths).
   img.src = new URL(src, import.meta.url).href;
   return img;
+}
+
+function getRewardsApiBase() {
+  if (window.__FPOM_REWARDS_API__) {
+    return String(window.__FPOM_REWARDS_API__).replace(/\/+$/, "");
+  }
+
+  const queryApi = new URLSearchParams(window.location.search).get("rewardsApi");
+  if (queryApi) {
+    return queryApi.replace(/\/+$/, "");
+  }
+
+  if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+    return DEFAULT_LOCAL_API;
+  }
+
+  return "";
+}
+
+function setClaimStatus(text) {
+  STATE.rewards.claimStatusText = text;
+  if (claimStatus) {
+    claimStatus.textContent = text;
+  }
+}
+
+function setClaimControlsDisabled(disabled) {
+  if (claimButton) {
+    claimButton.disabled = disabled;
+  }
+  if (claimModeSelect) {
+    claimModeSelect.disabled = disabled;
+  }
+  if (claimAddressInput) {
+    claimAddressInput.disabled = disabled;
+  }
+  if (claimSignatureInput) {
+    claimSignatureInput.disabled = disabled;
+  }
+}
+
+function getInstallId() {
+  const key = "fpom_install_id";
+  const existing = window.localStorage.getItem(key);
+  if (existing) {
+    return existing;
+  }
+  const created = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  window.localStorage.setItem(key, created);
+  return created;
+}
+
+function getFingerprint() {
+  const payload = {
+    installId: getInstallId(),
+    ua: navigator.userAgent || "",
+    lang: navigator.language || "",
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    platform: navigator.platform || "",
+  };
+  return JSON.stringify(payload);
+}
+
+async function apiPost(path, body) {
+  const base = STATE.rewards.apiBase;
+  if (!base) {
+    throw new Error("Rewards API is not configured");
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REWARDS_API_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const errorCode = json.error ? String(json.error) : `http_${response.status}`;
+      throw new Error(errorCode);
+    }
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function ensureRewardsSession() {
+  if (STATE.rewards.sessionId) {
+    return STATE.rewards.sessionId;
+  }
+  if (!STATE.rewards.apiBase) {
+    return null;
+  }
+
+  const session = await apiPost("/session/start", { fingerprint: getFingerprint() });
+  STATE.rewards.sessionId = session.sessionId;
+  return STATE.rewards.sessionId;
+}
+
+function getRunSummary() {
+  const durationMs = Math.max(1, Math.floor(performance.now() - STATE.runStats.startedAtMs));
+  return {
+    won: STATE.mode === "won",
+    durationMs,
+    pelletsEaten: STATE.runStats.pelletsEaten,
+    powerPelletsEaten: STATE.runStats.powerPelletsEaten,
+    enemiesEaten: STATE.runStats.enemiesEaten,
+    finalScoreClient: STATE.score,
+  };
 }
 
 function initMaze() {
@@ -174,15 +308,30 @@ function startNewGame() {
   STATE.elapsed = 0;
   STATE.paused = false;
   STATE.effects = [];
+  STATE.runStats.startedAtMs = performance.now();
+  STATE.runStats.pelletsEaten = 0;
+  STATE.runStats.powerPelletsEaten = 0;
+  STATE.runStats.enemiesEaten = 0;
+  STATE.rewards.sessionId = null;
   STATE.maze = MAZE_TEMPLATE.map((row) => row.split(""));
   initMaze();
   resetEntities();
+  setClaimStatus("");
+  if (rewardPanel) {
+    rewardPanel.hidden = true;
+  }
   hideOverlay();
   ensureAudioContext();
   if (audioCtx?.state === "suspended") {
     audioCtx.resume().catch(() => {});
   }
   playTone(460, 0.09, "triangle", 0.04);
+
+  ensureRewardsSession().catch(() => {
+    if (STATE.rewards.apiBase) {
+      setClaimStatus("Rewards session is unavailable right now");
+    }
+  });
 }
 
 function resetRound() {
@@ -203,6 +352,14 @@ function showOverlay(text, buttonLabel) {
       ? "Delusion-fueled momentum complete. Press start for another run."
       : "FPOM got rugged by memes. Press start to run it back.";
   startButton.textContent = buttonLabel;
+
+  if (rewardPanel) {
+    const showRewards = STATE.mode === "won";
+    rewardPanel.hidden = !showRewards;
+    if (showRewards && rewardSummary) {
+      rewardSummary.textContent = `Round reward: ${STATE.score.toLocaleString("en-US")} FPOM`;
+    }
+  }
 }
 
 function ensureAudioContext() {
@@ -428,12 +585,14 @@ function eatPellets() {
       pellet.eaten = true;
       STATE.pelletsLeft -= 1;
       if (pellet.power) {
+        STATE.runStats.powerPelletsEaten += 1;
         STATE.score += SCORE_VALUES.POWER_PELLET;
         STATE.powerTimer = 8;
         STATE.combo = 0;
         playTone(620, 0.08, "triangle", 0.05);
         playTone(860, 0.11, "triangle", 0.045);
       } else {
+        STATE.runStats.pelletsEaten += 1;
         STATE.score += SCORE_VALUES.PELLET;
         playTone(250, 0.04, "square", 0.02);
       }
@@ -443,6 +602,11 @@ function eatPellets() {
   if (STATE.pelletsLeft <= 0) {
     STATE.score += SCORE_VALUES.ROUND_CLEAR_BONUS;
     STATE.mode = "won";
+    if (!STATE.rewards.apiBase) {
+      setClaimStatus("Rewards API is not configured for this host");
+    } else {
+      setClaimStatus("Enter your address and claim your FPOM");
+    }
     showOverlay("FPOM Wins", "Play Again");
     playTone(840, 0.1, "sawtooth", 0.06);
     playTone(1040, 0.15, "triangle", 0.05);
@@ -464,6 +628,7 @@ function handleEnemyCollisions() {
       const spawn = tileCenter(14, 9);
       enemy.x = spawn.x;
       enemy.y = spawn.y;
+      STATE.runStats.enemiesEaten += 1;
       STATE.combo += 1;
       STATE.score += SCORE_VALUES.ENEMY_BASE + STATE.combo * SCORE_VALUES.ENEMY_COMBO_STEP;
       playTone(700, 0.06, "square", 0.04);
@@ -838,6 +1003,80 @@ async function toggleFullscreen() {
   }
 }
 
+function readClaimForm() {
+  const verificationMode = claimModeSelect ? claimModeSelect.value : "wallet_signature";
+  const address = claimAddressInput ? claimAddressInput.value.trim() : "";
+  const signature = claimSignatureInput ? claimSignatureInput.value.trim() : "";
+  return { verificationMode, address, signature };
+}
+
+async function submitRewardClaim() {
+  if (STATE.mode !== "won" || STATE.rewards.claimInFlight) {
+    return;
+  }
+
+  if (!STATE.rewards.apiBase) {
+    setClaimStatus("Rewards API is not configured");
+    return;
+  }
+
+  const { verificationMode, address, signature } = readClaimForm();
+  if (!address) {
+    setClaimStatus("Enter a Massa address first");
+    return;
+  }
+
+  STATE.rewards.claimInFlight = true;
+  setClaimControlsDisabled(true);
+  setClaimStatus("Preparing claim...");
+
+  try {
+    const sessionId = await ensureRewardsSession();
+    if (!sessionId) {
+      throw new Error("session_unavailable");
+    }
+
+    const prepared = await apiPost("/claim/prepare", {
+      sessionId,
+      address,
+      verificationMode,
+      fingerprint: getFingerprint(),
+      run: getRunSummary(),
+    });
+
+    const needsSignature = Boolean(prepared.requiresSignature);
+    if (needsSignature && !signature) {
+      setClaimStatus(`Challenge: ${prepared.challenge}. Sign and paste the signature`);
+      return;
+    }
+
+    setClaimStatus("Confirming claim...");
+    const confirmed = await apiPost("/claim/confirm", {
+      claimId: prepared.claimId,
+      signature: signature || undefined,
+    });
+
+    if (confirmed.status === "PAID") {
+      const txHash = confirmed.txHash ? ` tx=${confirmed.txHash}` : "";
+      setClaimStatus(`Claim paid successfully.${txHash}`);
+      return;
+    }
+
+    if (confirmed.status === "MANUAL_REVIEW") {
+      setClaimStatus("Claim was flagged for manual review");
+      return;
+    }
+
+    setClaimStatus(`Claim status: ${String(confirmed.status || "unknown")}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "claim_failed";
+    setClaimStatus(`Claim failed: ${message}`);
+  } finally {
+    STATE.rewards.claimInFlight = false;
+    setClaimControlsDisabled(false);
+  }
+}
+
 function onKeyDown(event) {
   const { code } = event;
   keysPressed.add(code);
@@ -873,6 +1112,20 @@ function setupEvents() {
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
   startButton.addEventListener("click", () => startNewGame());
+  if (claimButton) {
+    claimButton.addEventListener("click", () => {
+      submitRewardClaim().catch(() => {});
+    });
+  }
+  if (claimModeSelect && claimSignatureInput) {
+    claimModeSelect.addEventListener("change", () => {
+      const needSignature = claimModeSelect.value === "wallet_signature";
+      claimSignatureInput.disabled = !needSignature;
+      if (!needSignature) {
+        claimSignatureInput.value = "";
+      }
+    });
+  }
 
   document.addEventListener("fullscreenchange", () => {
     if (!document.fullscreenElement) {
@@ -889,9 +1142,19 @@ function setupEvents() {
 }
 
 function init() {
+  STATE.rewards.apiBase = getRewardsApiBase();
   initMaze();
   resetEntities();
   setupEvents();
+  setClaimControlsDisabled(false);
+  if (claimSignatureInput && claimModeSelect) {
+    claimSignatureInput.disabled = claimModeSelect.value !== "wallet_signature";
+  }
+  if (STATE.rewards.apiBase) {
+    setClaimStatus(`Rewards API: ${STATE.rewards.apiBase}`);
+  } else {
+    setClaimStatus("Rewards API is not configured");
+  }
   window.render_game_to_text = renderGameToText;
   window.advanceTime = advanceTime;
   window.__fpom_game = { state: STATE };

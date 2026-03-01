@@ -91,3 +91,21 @@ model PayoutJob {
 
   @@index([status])
 }
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  level     String   @default("INFO")
+  event     String
+  message   String?
+  claimId   String?
+  sessionId String?
+  address   String?
+  payload   String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([event])
+  @@index([claimId])
+  @@index([sessionId])
+  @@index([address])
+}

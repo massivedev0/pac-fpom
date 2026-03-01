@@ -88,6 +88,66 @@ body {
   line-height: 1.7;
 }
 
+.reward-panel {
+  width: min(520px, 92vw);
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 2px solid rgba(123, 17, 0, 0.2);
+}
+
+.reward-summary {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: #5a1208;
+}
+
+.reward-label {
+  font-size: 10px;
+  color: #5a1208;
+  text-align: left;
+}
+
+.reward-input {
+  width: 100%;
+  border: 2px solid rgba(123, 17, 0, 0.24);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: "Press Start 2P", monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.claim-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-family: "Bungee", sans-serif;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+  color: #fff;
+  cursor: pointer;
+  background: linear-gradient(180deg, #ff6234, #dc1f1f);
+  box-shadow: 0 5px 0 #7c1509;
+}
+
+.claim-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.claim-status {
+  margin: 4px 0 0;
+  min-height: 16px;
+  font-size: 10px;
+  color: #33120d;
+  line-height: 1.45;
+  text-align: left;
+}
+
 #start-btn {
   border: 0;
   border-radius: 999px;
