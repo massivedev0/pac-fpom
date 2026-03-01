@@ -14,7 +14,7 @@ FPOM Meme Hunt is a lightweight Pac-Man-style browser game built for FPOM promot
 
 ```bash
 npm run serve
-# open http://localhost:4174
+# open http://localhost:4177
 ```
 
 ## Smoke Check (Playwright client)

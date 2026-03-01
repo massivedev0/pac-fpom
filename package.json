@@ -4,8 +4,8 @@
   "description": "FPOM Meme Hunt web game (Pac-Man style promo mini-game)",
   "main": "src/game.js",
   "scripts": {
-    "serve": "python3 -m http.server 4174",
-    "test:smoke": "node \"${CODEX_HOME:-$HOME/.codex}/skills/develop-web-game/scripts/web_game_playwright_client.js\" --url http://localhost:4174 --actions-file ./tests/playwright/actions/smoke.json --iterations 1 --pause-ms 120 --screenshot-dir ./tests/playwright/artifacts/smoke"
+    "serve": "python3 -m http.server 4177",
+    "test:smoke": "node \"${CODEX_HOME:-$HOME/.codex}/skills/develop-web-game/scripts/web_game_playwright_client.js\" --url http://localhost:4177 --actions-file ./tests/playwright/actions/smoke.json --iterations 1 --pause-ms 120 --screenshot-dir ./tests/playwright/artifacts/smoke"
   },
   "keywords": [],
   "author": "",
