@@ -8,6 +8,15 @@ const BASE_HEIGHT = 640;
 const TILE = 32;
 const FIXED_DT = 1 / 60;
 
+const SCORE_VALUES = {
+  // Tuned so a full clear gives ~100k points (without heavy enemy farming).
+  PELLET: 350,
+  POWER_PELLET: 1500,
+  ENEMY_BASE: 2500,
+  ENEMY_COMBO_STEP: 1000,
+  ROUND_CLEAR_BONUS: 12000,
+};
+
 const DIRS = {
   left: { x: -1, y: 0 },
   right: { x: 1, y: 0 },
@@ -419,19 +428,20 @@ function eatPellets() {
       pellet.eaten = true;
       STATE.pelletsLeft -= 1;
       if (pellet.power) {
-        STATE.score += 60;
+        STATE.score += SCORE_VALUES.POWER_PELLET;
         STATE.powerTimer = 8;
         STATE.combo = 0;
         playTone(620, 0.08, "triangle", 0.05);
         playTone(860, 0.11, "triangle", 0.045);
       } else {
-        STATE.score += 12;
+        STATE.score += SCORE_VALUES.PELLET;
         playTone(250, 0.04, "square", 0.02);
       }
     }
   }
 
   if (STATE.pelletsLeft <= 0) {
+    STATE.score += SCORE_VALUES.ROUND_CLEAR_BONUS;
     STATE.mode = "won";
     showOverlay("FPOM Wins", "Play Again");
     playTone(840, 0.1, "sawtooth", 0.06);
@@ -455,7 +465,7 @@ function handleEnemyCollisions() {
       enemy.x = spawn.x;
       enemy.y = spawn.y;
       STATE.combo += 1;
-      STATE.score += 150 + STATE.combo * 50;
+      STATE.score += SCORE_VALUES.ENEMY_BASE + STATE.combo * SCORE_VALUES.ENEMY_COMBO_STEP;
       playTone(700, 0.06, "square", 0.04);
       playTone(920, 0.08, "triangle", 0.035);
     } else {
