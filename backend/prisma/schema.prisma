@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  nonce     String
+  ipHash    String?
+  fpHash    String?
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events SessionEvent[]
+  run    Run?
+  claim  Claim?
+
+  @@index([createdAt])
+  @@index([ipHash])
+}
+
+model SessionEvent {
+  id        Int      @id @default(autoincrement())
+  sessionId String
+  seq       Int
+  payload   String
+  createdAt DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, seq])
+  @@index([sessionId])
+}
+
+model Run {
+  id                String   @id @default(cuid())
+  sessionId         String   @unique
+  won               Boolean
+  durationMs        Int
+  pelletsEaten      Int
+  powerPelletsEaten Int
+  enemiesEaten      Int
+  finalScoreClient  Int
+  finalScoreServer  Int
+  riskScore         Int      @default(0)
+  createdAt         DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model Claim {
+  id               String   @id @default(cuid())
+  sessionId        String   @unique
+  address          String
+  verificationMode String
+  amount           Int
+  challenge        String
+  signature        String?
+  status           String   @default("PREPARED")
+  txHash           String?
+  ipHash           String?
+  fpHash           String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  session   Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  payoutJob PayoutJob?
+
+  @@index([address])
+  @@index([status])
+  @@index([createdAt])
+  @@index([ipHash])
+  @@index([fpHash])
+}
+
+model PayoutJob {
+  id        String   @id @default(cuid())
+  claimId   String   @unique
+  status    String   @default("QUEUED")
+  attempts  Int      @default(0)
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
