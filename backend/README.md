@@ -12,8 +12,10 @@ A simple backend for issuing FPOM rewards after a completed round
 - MVP anti-abuse checks for IP, fingerprint, and risk score
 - In-process payout worker
 - `PAYOUT_DRY_RUN=true` by default (no real on-chain transfer)
+- Manual review guardrails for oversized payout and daily payout volume
 - Audit log table in DB for claim verification and payout events
-- CLI log viewer for readable audit logs
+- Slack webhook notifications for payout and manual review events
+- CLI log viewer with fixed-width columns and colors
 
 ## Quick start
 
@@ -73,9 +75,12 @@ Main ones:
 
 - `DATABASE_URL`
 - `PAYOUT_DRY_RUN`
+- `MAX_SINGLE_PAYOUT_AMOUNT`
+- `MAX_PAYOUTS_PER_DAY`
 - `MAX_CLAIMS_PER_ADDRESS`
 - `IP_CLAIMS_PER_DAY_LIMIT`
 - `MASSA_REWARD_WALLET_PK`
+- `SLACK_WEBHOOK_URL`
 - `LOG_LEVEL`
 - `PRETTY_LOGS`
 

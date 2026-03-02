@@ -9,6 +9,7 @@ const claimAddressInput = document.getElementById("claim-address");
 const claimSignatureInput = document.getElementById("claim-signature");
 const claimButton = document.getElementById("claim-btn");
 const claimStatus = document.getElementById("claim-status");
+const devWinButton = document.getElementById("dev-win-btn");
 
 const BASE_WIDTH = 960;
 const BASE_HEIGHT = 640;
@@ -17,6 +18,7 @@ const FIXED_DT = 1 / 60;
 
 const REWARDS_API_TIMEOUT_MS = 11_000;
 const DEFAULT_LOCAL_API = "http://127.0.0.1:8787";
+const DEFAULT_DEBUG_WIN_SCORE = 6_050;
 
 const SCORE_VALUES = {
   // Tuned so a full clear gives ~100k points (without heavy enemy farming).
@@ -132,6 +134,13 @@ function getRewardsApiBase() {
   return "";
 }
 
+function isDebugToolsEnabled() {
+  if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+    return true;
+  }
+  return new URLSearchParams(window.location.search).get("dev") === "1";
+}
+
 function setClaimStatus(text) {
   STATE.rewards.claimStatusText = text;
   if (claimStatus) {
@@ -225,6 +234,26 @@ function getRunSummary() {
     enemiesEaten: STATE.runStats.enemiesEaten,
     finalScoreClient: STATE.score,
   };
+}
+
+function triggerDebugVictory() {
+  if (STATE.mode !== "playing") {
+    return;
+  }
+
+  for (const pellet of STATE.pellets) {
+    pellet.eaten = true;
+  }
+  STATE.pelletsLeft = 0;
+  STATE.runStats.pelletsEaten = 233;
+  STATE.runStats.powerPelletsEaten = 5;
+  if (STATE.runStats.enemiesEaten < 2) {
+    STATE.runStats.enemiesEaten = 2;
+  }
+  STATE.score = Math.max(STATE.score, DEFAULT_DEBUG_WIN_SCORE);
+  STATE.mode = "won";
+  setClaimStatus("Debug victory enabled: submit reward claim");
+  showOverlay("FPOM Wins", "Play Again");
 }
 
 function initMaze() {
@@ -1126,6 +1155,11 @@ function setupEvents() {
       }
     });
   }
+  if (devWinButton) {
+    devWinButton.addEventListener("click", () => {
+      triggerDebugVictory();
+    });
+  }
 
   document.addEventListener("fullscreenchange", () => {
     if (!document.fullscreenElement) {
@@ -1146,6 +1180,9 @@ function init() {
   initMaze();
   resetEntities();
   setupEvents();
+  if (devWinButton) {
+    devWinButton.hidden = !isDebugToolsEnabled();
+  }
   setClaimControlsDisabled(false);
   if (claimSignatureInput && claimModeSelect) {
     claimSignatureInput.disabled = claimModeSelect.value !== "wallet_signature";

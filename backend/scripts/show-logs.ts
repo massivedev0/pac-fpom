@@ -1,3 +1,4 @@
+import process from "node:process";
 import { PrismaClient } from "@prisma/client";
 
 type CliOptions = {
@@ -7,6 +8,28 @@ type CliOptions = {
   claimId?: string;
   json: boolean;
 };
+
+type RowData = {
+  time: string;
+  level: string;
+  event: string;
+  claim: string;
+  address: string;
+  session: string;
+  payload: string;
+};
+
+const COLOR = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  dim: "\x1b[2m",
+  cyan: "\x1b[36m",
+  blue: "\x1b[34m",
+  yellow: "\x1b[33m",
+  red: "\x1b[31m",
+  magenta: "\x1b[35m",
+  green: "\x1b[32m",
+} as const;
 
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
@@ -70,62 +93,161 @@ function formatPayload(payload: string | null): string {
 
   try {
     const parsed = JSON.parse(payload) as Record<string, unknown>;
-    const compact = JSON.stringify(parsed);
-    if (compact.length <= 100) {
-      return compact;
-    }
-    return `${compact.slice(0, 97)}...`;
+    return JSON.stringify(parsed);
   } catch {
-    if (payload.length <= 100) {
-      return payload;
-    }
-    return `${payload.slice(0, 97)}...`;
+    return payload;
   }
+}
+
+function truncate(text: string, width: number): string {
+  if (text.length <= width) {
+    return text;
+  }
+  if (width <= 1) {
+    return text.slice(0, width);
+  }
+  return `${text.slice(0, width - 1)}…`;
+}
+
+function colorize(text: string, code: string, enabled: boolean): string {
+  if (!enabled) {
+    return text;
+  }
+  return `${code}${text}${COLOR.reset}`;
+}
+
+function levelColor(level: string): string {
+  if (level === "ERROR") return COLOR.red;
+  if (level === "WARN") return COLOR.yellow;
+  if (level === "INFO") return COLOR.blue;
+  return COLOR.magenta;
+}
+
+function rowsFromLogs(
+  logs: Awaited<ReturnType<PrismaClient["auditLog"]["findMany"]>>,
+): RowData[] {
+  return logs.map((row) => ({
+    time: row.createdAt.toISOString().replace("T", " ").replace(".000Z", "Z"),
+    level: row.level,
+    event: row.event,
+    claim: short(row.claimId),
+    address: short(row.address),
+    session: short(row.sessionId),
+    payload: formatPayload(row.payload),
+  }));
+}
+
+function renderTable(rows: RowData[], colorEnabled: boolean): string {
+  const headers: RowData = {
+    time: "time",
+    level: "level",
+    event: "event",
+    claim: "claim",
+    address: "address",
+    session: "session",
+    payload: "payload",
+  };
+
+  const maxWidths: Record<keyof RowData, number> = {
+    time: 20,
+    level: 5,
+    event: 42,
+    claim: 18,
+    address: 18,
+    session: 18,
+    payload: 78,
+  };
+
+  const widths: Record<keyof RowData, number> = {
+    time: Math.min(maxWidths.time, Math.max(headers.time.length, ...rows.map((row) => row.time.length))),
+    level: Math.min(maxWidths.level, Math.max(headers.level.length, ...rows.map((row) => row.level.length))),
+    event: Math.min(maxWidths.event, Math.max(headers.event.length, ...rows.map((row) => row.event.length))),
+    claim: Math.min(maxWidths.claim, Math.max(headers.claim.length, ...rows.map((row) => row.claim.length))),
+    address: Math.min(maxWidths.address, Math.max(headers.address.length, ...rows.map((row) => row.address.length))),
+    session: Math.min(maxWidths.session, Math.max(headers.session.length, ...rows.map((row) => row.session.length))),
+    payload: Math.min(maxWidths.payload, Math.max(headers.payload.length, ...rows.map((row) => row.payload.length))),
+  };
+
+  const renderCell = (value: string, key: keyof RowData): string => truncate(value, widths[key]).padEnd(widths[key], " ");
+
+  const headerLine = [
+    renderCell(headers.time, "time"),
+    renderCell(headers.level, "level"),
+    renderCell(headers.event, "event"),
+    renderCell(headers.claim, "claim"),
+    renderCell(headers.address, "address"),
+    renderCell(headers.session, "session"),
+    renderCell(headers.payload, "payload"),
+  ].join("  ");
+
+  const separatorLine = [
+    "-".repeat(widths.time),
+    "-".repeat(widths.level),
+    "-".repeat(widths.event),
+    "-".repeat(widths.claim),
+    "-".repeat(widths.address),
+    "-".repeat(widths.session),
+    "-".repeat(widths.payload),
+  ].join("  ");
+
+  const lines = [
+    colorize(headerLine, `${COLOR.bold}${COLOR.cyan}`, colorEnabled),
+    colorize(separatorLine, COLOR.dim, colorEnabled),
+  ];
+
+  for (const row of rows) {
+    const levelCell = colorize(renderCell(row.level, "level"), levelColor(row.level), colorEnabled);
+    const eventCell = colorize(renderCell(row.event, "event"), COLOR.magenta, colorEnabled);
+    const payloadCell = colorize(renderCell(row.payload, "payload"), COLOR.green, colorEnabled);
+
+    lines.push(
+      [
+        renderCell(row.time, "time"),
+        levelCell,
+        eventCell,
+        renderCell(row.claim, "claim"),
+        renderCell(row.address, "address"),
+        renderCell(row.session, "session"),
+        payloadCell,
+      ].join("  "),
+    );
+  }
+
+  return lines.join("\n");
 }
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const prisma = new PrismaClient();
 
-  const logs = await prisma.auditLog.findMany({
-    where: {
-      event: options.event,
-      address: options.address,
-      claimId: options.claimId,
-    },
-    orderBy: { createdAt: "desc" },
-    take: options.limit,
-  });
+  try {
+    const logs = await prisma.auditLog.findMany({
+      where: {
+        event: options.event,
+        address: options.address,
+        claimId: options.claimId,
+      },
+      orderBy: { createdAt: "desc" },
+      take: options.limit,
+    });
 
-  if (options.json) {
-    console.log(JSON.stringify(logs, null, 2));
+    if (options.json) {
+      console.log(JSON.stringify(logs, null, 2));
+      return;
+    }
+
+    if (logs.length === 0) {
+      console.log("No audit logs found for provided filters");
+      return;
+    }
+
+    const colorEnabled = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+    const rows = rowsFromLogs(logs);
+    console.log(`Found ${logs.length} audit log entries`);
+    console.log(renderTable(rows, colorEnabled));
+  } finally {
     await prisma.$disconnect();
-    return;
   }
-
-  if (logs.length === 0) {
-    console.log("No audit logs found for provided filters");
-    await prisma.$disconnect();
-    return;
-  }
-
-  console.log(`Found ${logs.length} audit log entries`);
-  console.log("time | level | event | claim | address | session | payload");
-
-  for (const row of logs) {
-    const line = [
-      row.createdAt.toISOString(),
-      row.level,
-      row.event,
-      short(row.claimId),
-      short(row.address),
-      short(row.sessionId),
-      formatPayload(row.payload),
-    ].join(" | ");
-    console.log(line);
-  }
-
-  await prisma.$disconnect();
 }
 
 main().catch((error) => {

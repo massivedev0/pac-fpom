@@ -3,6 +3,9 @@ export type AppConfig = {
   port: number;
   fpomContractAddress: string;
   payoutDryRun: boolean;
+  maxSinglePayoutAmount: number;
+  maxPayoutsPerDay: number;
+  slackWebhookUrl: string;
   maxClaimsPerAddress: number;
   ipClaimsPerDayLimit: number;
   minRunDurationMs: number;
@@ -29,6 +32,9 @@ export function getConfig(env: EnvSource = process.env): AppConfig {
       env.FPOM_CONTRACT_ADDRESS ??
       "AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
     payoutDryRun: String(env.PAYOUT_DRY_RUN ?? "true") !== "false",
+    maxSinglePayoutAmount: asNumber(env.MAX_SINGLE_PAYOUT_AMOUNT, 300_000),
+    maxPayoutsPerDay: asNumber(env.MAX_PAYOUTS_PER_DAY, 50),
+    slackWebhookUrl: env.SLACK_WEBHOOK_URL ?? "",
     maxClaimsPerAddress: asNumber(env.MAX_CLAIMS_PER_ADDRESS, 2),
     ipClaimsPerDayLimit: asNumber(env.IP_CLAIMS_PER_DAY_LIMIT, 10),
     minRunDurationMs: asNumber(env.MIN_RUN_DURATION_MS, 45_000),

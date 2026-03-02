@@ -49,6 +49,27 @@ body {
   background: #1d1630;
 }
 
+.dev-win-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-family: "Bungee", sans-serif;
+  font-size: 16px;
+  color: #fff;
+  cursor: pointer;
+  background: linear-gradient(180deg, #1dcf74, #129453);
+  box-shadow: 0 4px 0 #0c5f35;
+  opacity: 0.95;
+}
+
+.dev-win-btn:active {
+  transform: translateY(1px);
+}
+
 .menu-overlay {
   position: absolute;
   inset: 0;

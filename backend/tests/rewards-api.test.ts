@@ -9,6 +9,9 @@ const BASE_CONFIG: AppConfig = {
   port: 0,
   fpomContractAddress: "AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
   payoutDryRun: true,
+  maxSinglePayoutAmount: 300_000,
+  maxPayoutsPerDay: 50,
+  slackWebhookUrl: "",
   maxClaimsPerAddress: 2,
   ipClaimsPerDayLimit: 10,
   minRunDurationMs: 45_000,
@@ -43,12 +46,15 @@ async function clearDatabase(prisma: PrismaClient) {
   await prisma.session.deleteMany();
 }
 
-async function createTestContext(): Promise<TestContext> {
+async function createTestContext(configPatch: Partial<AppConfig> = {}): Promise<TestContext> {
   const prisma = new PrismaClient();
   await clearDatabase(prisma);
 
   const app = createApp({
-    config: BASE_CONFIG,
+    config: {
+      ...BASE_CONFIG,
+      ...configPatch,
+    },
     prisma,
   });
 
@@ -215,6 +221,73 @@ test("claim prepare should reject non-winning run", async () => {
     assert.equal(prepareResponse.statusCode, 400);
     const body = prepareResponse.json() as { error: string };
     assert.equal(body.error, "round_not_won");
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("claim should go to manual review when payout exceeds single amount limit", async () => {
+  const context = await createTestContext({
+    maxSinglePayoutAmount: 100_000,
+  });
+
+  try {
+    const session = await startSession(context.app);
+
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      verificationMode: "address_only",
+      run: {
+        ...WINNING_RUN,
+        enemiesEaten: 80,
+        finalScoreClient: 301_050,
+      },
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string };
+
+    const confirmResponse = await confirmClaim(context.app, {
+      claimId: prepared.claimId,
+    });
+
+    assert.equal(confirmResponse.statusCode, 200);
+    const body = confirmResponse.json() as { status: string; reason: string };
+    assert.equal(body.status, "MANUAL_REVIEW");
+    assert.match(body.reason, /single_payout_limit_exceeded/);
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("claim should go to manual review when daily payout limit is reached", async () => {
+  const context = await createTestContext({
+    maxPayoutsPerDay: 1,
+  });
+
+  try {
+    await createPaidClaim(context.app, VALID_ADDRESS);
+
+    const session2 = await startSession(context.app);
+    const prepare2 = await prepareClaim(context.app, {
+      sessionId: session2.sessionId,
+      address: "AU9XGDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+      verificationMode: "address_only",
+      run: WINNING_RUN,
+    });
+
+    assert.equal(prepare2.statusCode, 200);
+    const prepared2 = prepare2.json() as { claimId: string };
+
+    const confirm2 = await confirmClaim(context.app, {
+      claimId: prepared2.claimId,
+    });
+
+    assert.equal(confirm2.statusCode, 200);
+    const body2 = confirm2.json() as { status: string; reason: string };
+    assert.equal(body2.status, "MANUAL_REVIEW");
+    assert.match(body2.reason, /daily_payout_limit_exceeded/);
   } finally {
     await context.cleanup();
   }

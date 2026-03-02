@@ -33,6 +33,7 @@ After round win the game can submit reward claims to backend API
 - Local default API: `http://127.0.0.1:8787`
 - Override with query param: `?rewardsApi=https://your-backend.example`
 - Override with global variable before `game.js`: `window.__FPOM_REWARDS_API__ = "https://your-backend.example"`
+- Debug shortcut button `Victory` is visible on localhost (or with `?dev=1`)
 
 Backend quick run:
 

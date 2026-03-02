@@ -74,6 +74,18 @@ type CreateAppOptions = {
   prisma?: PrismaClient;
 };
 
+type PayoutContext = {
+  claimId: string;
+  sessionId: string;
+  address: string;
+  amount: number;
+  verificationMode: string;
+  riskScore?: number | null;
+  txHash?: string;
+  dryRun?: boolean;
+  reason?: string;
+};
+
 function createLoggerOptions(config: AppConfig) {
   if (config.prettyLogs) {
     return {
@@ -147,6 +159,70 @@ function createAuditWriter(prisma: PrismaClient, logger: FastifyBaseLogger) {
       logger.error({ err: error, auditEvent: input.event }, "Failed to persist audit log");
     }
   };
+}
+
+function formatSlackPayoutMessage(context: PayoutContext): string {
+  const payoutMode = context.dryRun ? "DRY RUN" : "REAL";
+  return [
+    "FPOM payout event",
+    `Mode: ${payoutMode}`,
+    `Claim ID: ${context.claimId}`,
+    `Session ID: ${context.sessionId}`,
+    `Address: ${context.address}`,
+    `Amount: ${context.amount.toLocaleString("en-US")} FPOM`,
+    `Verification: ${context.verificationMode}`,
+    context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
+    context.txHash ? `Tx hash: ${context.txHash}` : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatSlackManualReviewMessage(context: PayoutContext): string {
+  return [
+    "FPOM manual review requested",
+    `Reason: ${context.reason ?? "unknown"}`,
+    `Claim ID: ${context.claimId}`,
+    `Session ID: ${context.sessionId}`,
+    `Address: ${context.address}`,
+    `Amount: ${context.amount.toLocaleString("en-US")} FPOM`,
+    `Verification: ${context.verificationMode}`,
+    context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function sendSlackNotification(app: FastifyInstance, config: AppConfig, text: string): Promise<void> {
+  if (!config.slackWebhookUrl) {
+    return;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6_000);
+
+  try {
+    const response = await fetch(config.slackWebhookUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      app.log.warn(
+        { statusCode: response.status, responseBody: body.slice(0, 300) },
+        "Slack webhook returned non-2xx status",
+      );
+    }
+  } catch (error) {
+    app.log.warn({ err: error }, "Failed to send Slack notification");
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function createApp(options: CreateAppOptions = {}): FastifyInstance {
@@ -388,8 +464,25 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       address: claim.address,
       payload: {
         reason,
+        amount: claim.amount,
+        verificationMode: claim.verificationMode,
       },
     });
+
+    const run = await prisma.run.findUnique({ where: { sessionId: claim.sessionId } });
+    await sendSlackNotification(
+      app,
+      config,
+      formatSlackManualReviewMessage({
+        claimId: claim.id,
+        sessionId: claim.sessionId,
+        address: claim.address,
+        amount: claim.amount,
+        verificationMode: claim.verificationMode,
+        riskScore: run?.riskScore ?? null,
+        reason,
+      }),
+    );
 
     return {
       status: CLAIM_STATUSES.MANUAL_REVIEW,
@@ -411,6 +504,29 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       };
     }
 
+    if (claim.amount > config.maxSinglePayoutAmount) {
+      return markAsManualReview(
+        { claimId: claim.id },
+        `single_payout_limit_exceeded:${config.maxSinglePayoutAmount}`,
+      );
+    }
+
+    const now = new Date();
+    const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const paidLast24h = await prisma.claim.count({
+      where: {
+        status: CLAIM_STATUSES.PAID,
+        updatedAt: { gte: last24h },
+      },
+    });
+    if (paidLast24h >= config.maxPayoutsPerDay) {
+      return markAsManualReview(
+        { claimId: claim.id },
+        `daily_payout_limit_exceeded:${config.maxPayoutsPerDay}`,
+      );
+    }
+
+    const run = await prisma.run.findUnique({ where: { sessionId: claim.sessionId } });
     const existing = await prisma.payoutJob.findUnique({ where: { claimId } });
     if (!existing) {
       await prisma.payoutJob.create({
@@ -456,8 +572,25 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         address: claim.address,
         payload: {
           txHash,
+          amount: claim.amount,
+          verificationMode: claim.verificationMode,
         },
       });
+
+      await sendSlackNotification(
+        app,
+        config,
+        formatSlackPayoutMessage({
+          claimId: claim.id,
+          sessionId: claim.sessionId,
+          address: claim.address,
+          amount: claim.amount,
+          verificationMode: claim.verificationMode,
+          riskScore: run?.riskScore ?? null,
+          txHash,
+          dryRun: true,
+        }),
+      );
 
       return {
         status: CLAIM_STATUSES.PAID,
@@ -475,12 +608,6 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           lastError: "Real payout integration is not configured yet.",
         },
       }),
-      prisma.claim.update({
-        where: { id: claimId },
-        data: {
-          status: CLAIM_STATUSES.MANUAL_REVIEW,
-        },
-      }),
     ]);
 
     await writeAuditLog({
@@ -493,11 +620,10 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         reason: "real_payout_not_configured",
       },
     });
-
-    return {
-      status: CLAIM_STATUSES.MANUAL_REVIEW,
-      reason: "Real payout integration is not configured yet.",
-    };
+    return markAsManualReview(
+      { claimId: claim.id },
+      "real_payout_not_configured",
+    );
   }
 
   app.post("/claim/confirm", async (req, reply) => {
@@ -720,8 +846,11 @@ async function bootstrap() {
       host: config.host,
       port: config.port,
       dryRun: config.payoutDryRun,
+      maxSinglePayoutAmount: config.maxSinglePayoutAmount,
+      maxPayoutsPerDay: config.maxPayoutsPerDay,
       maxClaimsPerAddress: config.maxClaimsPerAddress,
       fpomContractAddress: config.fpomContractAddress,
+      slackWebhookConfigured: Boolean(config.slackWebhookUrl),
     },
     "FPOM rewards backend started",
   );
