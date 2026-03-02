@@ -7,6 +7,7 @@ import { createApp } from "../src/server.js";
 const BASE_CONFIG: AppConfig = {
   host: "127.0.0.1",
   port: 0,
+  corsAllowedOrigins: ["http://localhost:4177"],
   fpomContractAddress: "AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
   payoutDryRun: true,
   maxSinglePayoutAmount: 300_000,

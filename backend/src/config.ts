@@ -1,6 +1,7 @@
 export type AppConfig = {
   host: string;
   port: number;
+  corsAllowedOrigins: string[];
   fpomContractAddress: string;
   payoutDryRun: boolean;
   maxSinglePayoutAmount: number;
@@ -24,10 +25,29 @@ function asNumber(value: string | undefined, fallback: number): number {
   return fallback;
 }
 
+function parseCsv(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 export function getConfig(env: EnvSource = process.env): AppConfig {
+  const corsAllowedOrigins = parseCsv(env.CORS_ALLOWED_ORIGINS);
+  const defaultAllowedOrigins = [
+    "http://localhost:4177",
+    "http://127.0.0.1:4177",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+  ];
+
   return {
     host: env.HOST ?? "0.0.0.0",
     port: asNumber(env.PORT, 8787),
+    corsAllowedOrigins: corsAllowedOrigins.length > 0 ? corsAllowedOrigins : defaultAllowedOrigins,
     fpomContractAddress:
       env.FPOM_CONTRACT_ADDRESS ??
       "AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",

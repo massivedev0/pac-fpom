@@ -230,6 +230,28 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const prisma = options.prisma ?? new PrismaClient();
   const app = Fastify({ logger: createLoggerOptions(config) });
   const writeAuditLog = createAuditWriter(prisma, app.log);
+  const allowedOrigins = new Set(config.corsAllowedOrigins);
+  const corsMethods = "GET,POST,OPTIONS";
+  const corsHeaders = "content-type";
+
+  app.addHook("onRequest", async (req, reply) => {
+    const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+    if (origin && !allowedOrigins.has(origin)) {
+      return reply.code(403).send({ error: "cors_not_allowed" });
+    }
+
+    if (origin) {
+      reply.header("access-control-allow-origin", origin);
+      reply.header("vary", "Origin");
+      reply.header("access-control-allow-methods", corsMethods);
+      reply.header("access-control-allow-headers", corsHeaders);
+      reply.header("access-control-max-age", "86400");
+    }
+
+    if (req.method === "OPTIONS") {
+      return reply.code(204).send();
+    }
+  });
 
   app.addHook("onClose", async () => {
     await prisma.$disconnect();

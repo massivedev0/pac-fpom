@@ -119,6 +119,10 @@ body {
   border: 2px solid rgba(123, 17, 0, 0.2);
 }
 
+.reward-panel[hidden] {
+  display: none !important;
+}
+
 .reward-summary {
   margin: 0 0 4px;
   font-size: 11px;

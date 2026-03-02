@@ -135,10 +135,9 @@ function getRewardsApiBase() {
 }
 
 function isDebugToolsEnabled() {
-  if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-    return true;
-  }
-  return new URLSearchParams(window.location.search).get("dev") === "1";
+  const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  const isDevParamEnabled = new URLSearchParams(window.location.search).get("dev") === "1";
+  return isLocalHost && isDevParamEnabled;
 }
 
 function setClaimStatus(text) {
@@ -237,6 +236,9 @@ function getRunSummary() {
 }
 
 function triggerDebugVictory() {
+  if (!isDebugToolsEnabled()) {
+    return;
+  }
   if (STATE.mode !== "playing") {
     return;
   }
@@ -355,12 +357,6 @@ function startNewGame() {
     audioCtx.resume().catch(() => {});
   }
   playTone(460, 0.09, "triangle", 0.04);
-
-  ensureRewardsSession().catch(() => {
-    if (STATE.rewards.apiBase) {
-      setClaimStatus("Rewards session is unavailable right now");
-    }
-  });
 }
 
 function resetRound() {
@@ -1182,6 +1178,9 @@ function init() {
   setupEvents();
   if (devWinButton) {
     devWinButton.hidden = !isDebugToolsEnabled();
+  }
+  if (rewardPanel) {
+    rewardPanel.hidden = true;
   }
   setClaimControlsDisabled(false);
   if (claimSignatureInput && claimModeSelect) {
