@@ -33,6 +33,8 @@ After round win the game can submit reward claims to backend API
 - Local default API: `http://127.0.0.1:8787`
 - Override with query param: `?rewardsApi=https://your-backend.example`
 - Override with global variable before `game.js`: `window.__FPOM_REWARDS_API__ = "https://your-backend.example"`
+- Promo tweet URL is loaded from backend `GET /public/config` (`X_PROMO_TWEET` in backend env)
+- Optional promo tweet override: `?promoTweet=https://x.com/account/status/123`
 - Debug shortcut button `Victory` is visible only on localhost with `?dev=1`
 - Claim form requires Massa address (or wallet connect) and X profile URL in format `https://x.com/account`
 

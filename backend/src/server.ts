@@ -278,6 +278,9 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   });
 
   app.get("/health", async () => ({ ok: true }));
+  app.get("/public/config", async () => ({
+    xPromoTweet: config.xPromoTweet,
+  }));
 
   app.post("/session/start", async (req, reply) => {
     const parsed = sessionStartSchema.safeParse(req.body ?? {});
@@ -971,6 +974,7 @@ async function bootstrap() {
       maxClaimsPerAddress: config.maxClaimsPerAddress,
       maxClaimsPerXProfile: config.maxClaimsPerXProfile,
       fpomContractAddress: config.fpomContractAddress,
+      xPromoTweet: config.xPromoTweet,
       slackWebhookConfigured: Boolean(config.slackWebhookUrl),
       corsAllowedOrigins: config.corsAllowedOrigins,
     },

@@ -9,6 +9,7 @@ const BASE_CONFIG: AppConfig = {
   port: 0,
   corsAllowedOrigins: ["http://localhost:4177"],
   fpomContractAddress: "AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+  xPromoTweet: "https://x.com/massalabs",
   payoutDryRun: true,
   maxSinglePayoutAmount: 300_000,
   maxPayoutsPerDay: 50,
@@ -159,6 +160,25 @@ test("reward claim happy path should pay in dry run and write audit logs", async
     assert.ok(events.includes("CLAIM_PREPARED"));
     assert.ok(events.includes("CLAIM_CONFIRMED"));
     assert.ok(events.includes("PAYOUT_PAID_DRY_RUN"));
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("public config should expose promo tweet url", async () => {
+  const context = await createTestContext({
+    xPromoTweet: "https://x.com/fpomofficial/status/1234567890",
+  });
+
+  try {
+    const response = await context.app.inject({
+      method: "GET",
+      url: "/public/config",
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as { xPromoTweet: string };
+    assert.equal(body.xPromoTweet, "https://x.com/fpomofficial/status/1234567890");
   } finally {
     await context.cleanup();
   }

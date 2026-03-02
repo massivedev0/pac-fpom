@@ -3,6 +3,7 @@ export type AppConfig = {
   port: number;
   corsAllowedOrigins: string[];
   fpomContractAddress: string;
+  xPromoTweet: string;
   payoutDryRun: boolean;
   maxSinglePayoutAmount: number;
   maxPayoutsPerDay: number;
@@ -52,6 +53,7 @@ export function getConfig(env: EnvSource = process.env): AppConfig {
     fpomContractAddress:
       env.FPOM_CONTRACT_ADDRESS ??
       "AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+    xPromoTweet: env.X_PROMO_TWEET ?? "https://x.com/massalabs",
     payoutDryRun: String(env.PAYOUT_DRY_RUN ?? "true") !== "false",
     maxSinglePayoutAmount: asNumber(env.MAX_SINGLE_PAYOUT_AMOUNT, 300_000),
     maxPayoutsPerDay: asNumber(env.MAX_PAYOUTS_PER_DAY, 50),

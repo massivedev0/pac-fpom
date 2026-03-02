@@ -38,6 +38,7 @@ API will be available at `http://localhost:8787`.
 - `POST /claim/confirm`
 - `GET /claim/:claimId`
 - `GET /health`
+- `GET /public/config`
 
 ## Tests
 
@@ -79,6 +80,7 @@ Main ones:
 - `PAYOUT_DRY_RUN`
 - `MAX_SINGLE_PAYOUT_AMOUNT`
 - `MAX_PAYOUTS_PER_DAY`
+- `X_PROMO_TWEET`
 - `MAX_CLAIMS_PER_ADDRESS`
 - `MAX_CLAIMS_PER_X_PROFILE`
 - `IP_CLAIMS_PER_DAY_LIMIT`

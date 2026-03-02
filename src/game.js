@@ -144,7 +144,7 @@ function getRewardsApiBase() {
   return "";
 }
 
-function getPromoTweetUrl() {
+function getPromoTweetOverrideUrl() {
   if (window.__FPOM_X_PROMO_TWEET__) {
     return String(window.__FPOM_X_PROMO_TWEET__).trim();
   }
@@ -154,7 +154,17 @@ function getPromoTweetUrl() {
     return queryValue.trim();
   }
 
-  return DEFAULT_X_PROMO_TWEET;
+  return "";
+}
+
+function applyPromoTweetUrl(url) {
+  const normalized = (url || "").trim() || DEFAULT_X_PROMO_TWEET;
+  STATE.rewards.promoTweetUrl = normalized;
+
+  if (promoTweetLink) {
+    promoTweetLink.href = normalized;
+    promoTweetLink.textContent = normalized;
+  }
 }
 
 function isDebugToolsEnabled() {
@@ -366,6 +376,46 @@ async function apiPost(path, body) {
     return json;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function apiGet(path) {
+  const base = STATE.rewards.apiBase;
+  if (!base) {
+    throw new Error("Rewards API is not configured");
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REWARDS_API_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${base}${path}`, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const errorCode = json.error ? String(json.error) : `http_${response.status}`;
+      throw new Error(errorCode);
+    }
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function syncPromoTweetFromBackend() {
+  if (!STATE.rewards.apiBase) {
+    return;
+  }
+
+  try {
+    const payload = await apiGet("/public/config");
+    if (payload && typeof payload.xPromoTweet === "string" && payload.xPromoTweet.trim()) {
+      applyPromoTweetUrl(payload.xPromoTweet.trim());
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "unknown";
+    console.warn(`Failed to load promo tweet from backend: ${reason}`);
   }
 }
 
@@ -1381,7 +1431,8 @@ function setupEvents() {
 
 function init() {
   STATE.rewards.apiBase = getRewardsApiBase();
-  STATE.rewards.promoTweetUrl = getPromoTweetUrl();
+  const promoTweetOverride = getPromoTweetOverrideUrl();
+  applyPromoTweetUrl(promoTweetOverride || DEFAULT_X_PROMO_TWEET);
   initMaze();
   resetEntities();
   setupEvents();
@@ -1394,12 +1445,11 @@ function init() {
   setClaimControlsDisabled(false);
   updateClaimModeUI();
   setWalletStatus("Wallet not connected");
-  if (promoTweetLink) {
-    promoTweetLink.href = STATE.rewards.promoTweetUrl;
-    promoTweetLink.textContent = STATE.rewards.promoTweetUrl;
-  }
   if (STATE.rewards.apiBase) {
     setClaimStatus(`Rewards API: ${STATE.rewards.apiBase}`);
+    if (!promoTweetOverride) {
+      syncPromoTweetFromBackend().catch(() => {});
+    }
   } else {
     setClaimStatus("Rewards API is not configured");
   }
