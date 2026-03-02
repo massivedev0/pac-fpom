@@ -29,26 +29,38 @@
               <option value="wallet_signature">Connect wallet (recommended)</option>
               <option value="address_only">Address only</option>
             </select>
-            <label class="reward-label" for="claim-address">Massa address</label>
-            <input
-              id="claim-address"
-              class="reward-input"
-              type="text"
-              inputmode="text"
-              autocomplete="off"
-              placeholder="AU... / AS..."
-              maxlength="160"
-            />
-            <label class="reward-label" for="claim-signature">Signature (for wallet mode)</label>
-            <input
-              id="claim-signature"
-              class="reward-input"
-              type="text"
-              inputmode="text"
-              autocomplete="off"
-              placeholder="Paste signed challenge"
-              maxlength="5000"
-            />
+            <div id="wallet-connect-row" class="reward-row" hidden>
+              <button id="wallet-connect-btn" class="wallet-connect-btn" type="button">Connect Massa Wallet</button>
+              <p id="wallet-status" class="wallet-status">Wallet not connected</p>
+            </div>
+            <div id="address-row" class="reward-row">
+              <label class="reward-label" for="claim-address">Massa address</label>
+              <input
+                id="claim-address"
+                class="reward-input"
+                type="text"
+                inputmode="text"
+                autocomplete="off"
+                placeholder="AU... / AS..."
+                maxlength="160"
+              />
+            </div>
+            <p class="reward-note">
+              To claim rewards, complete Like + Retweet of
+              <a id="promo-tweet-link" href="#" target="_blank" rel="noopener noreferrer">X_PROMO_TWEET</a>
+            </p>
+            <div id="x-profile-row" class="reward-row">
+              <label class="reward-label" for="x-profile">X profile URL</label>
+              <input
+                id="x-profile"
+                class="reward-input"
+                type="url"
+                inputmode="url"
+                autocomplete="off"
+                placeholder="https://x.com/account"
+                maxlength="200"
+              />
+            </div>
             <button id="claim-btn" class="claim-btn" type="button">Claim FPOM</button>
             <p id="claim-status" class="claim-status" role="status" aria-live="polite"></p>
           </div>

@@ -10,6 +10,7 @@ A simple backend for issuing FPOM rewards after a completed round
 - Limit of max 2 successful claims per address
 - Two verification modes: `wallet_signature` (default) and `address_only`
 - MVP anti-abuse checks for IP, fingerprint, and risk score
+- X profile format validation (`https://x.com/account`) and limit of 2 paid claims per profile
 - In-process payout worker
 - `PAYOUT_DRY_RUN=true` by default (no real on-chain transfer)
 - Manual review guardrails for oversized payout and daily payout volume
@@ -79,6 +80,7 @@ Main ones:
 - `MAX_SINGLE_PAYOUT_AMOUNT`
 - `MAX_PAYOUTS_PER_DAY`
 - `MAX_CLAIMS_PER_ADDRESS`
+- `MAX_CLAIMS_PER_X_PROFILE`
 - `IP_CLAIMS_PER_DAY_LIMIT`
 - `MASSA_REWARD_WALLET_PK`
 - `SLACK_WEBHOOK_URL`

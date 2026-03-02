@@ -8,6 +8,7 @@ export type AppConfig = {
   maxPayoutsPerDay: number;
   slackWebhookUrl: string;
   maxClaimsPerAddress: number;
+  maxClaimsPerXProfile: number;
   ipClaimsPerDayLimit: number;
   minRunDurationMs: number;
   maxRunDurationMs: number;
@@ -56,6 +57,7 @@ export function getConfig(env: EnvSource = process.env): AppConfig {
     maxPayoutsPerDay: asNumber(env.MAX_PAYOUTS_PER_DAY, 50),
     slackWebhookUrl: env.SLACK_WEBHOOK_URL ?? "",
     maxClaimsPerAddress: asNumber(env.MAX_CLAIMS_PER_ADDRESS, 2),
+    maxClaimsPerXProfile: asNumber(env.MAX_CLAIMS_PER_X_PROFILE, 2),
     ipClaimsPerDayLimit: asNumber(env.IP_CLAIMS_PER_DAY_LIMIT, 10),
     minRunDurationMs: asNumber(env.MIN_RUN_DURATION_MS, 45_000),
     maxRunDurationMs: asNumber(env.MAX_RUN_DURATION_MS, 900_000),

@@ -47,6 +47,7 @@ const runSummarySchema = z.object({
 const claimPrepareSchema = z.object({
   sessionId: z.string().trim().min(8),
   address: z.string().trim().min(10),
+  xProfile: z.string().trim().min(10).max(200),
   verificationMode: z
     .enum([VERIFICATION_MODES.wallet_signature, VERIFICATION_MODES.address_only])
     .default(VERIFICATION_MODES.wallet_signature),
@@ -78,6 +79,7 @@ type PayoutContext = {
   claimId: string;
   sessionId: string;
   address: string;
+  xProfile: string;
   amount: number;
   verificationMode: string;
   riskScore?: number | null;
@@ -85,6 +87,22 @@ type PayoutContext = {
   dryRun?: boolean;
   reason?: string;
 };
+
+const X_PROFILE_REGEX = /^https:\/\/x\.com\/([A-Za-z0-9_]{1,15})\/?$/;
+
+function normalizeXProfileUrl(input: string): string | null {
+  const trimmed = input.trim();
+  const match = X_PROFILE_REGEX.exec(trimmed);
+  if (!match) {
+    return null;
+  }
+  const username = match[1].toLowerCase();
+  return `https://x.com/${username}`;
+}
+
+function safeXProfile(value: string | null | undefined): string {
+  return value ?? "https://x.com/unknown";
+}
 
 function createLoggerOptions(config: AppConfig) {
   if (config.prettyLogs) {
@@ -169,6 +187,7 @@ function formatSlackPayoutMessage(context: PayoutContext): string {
     `Claim ID: ${context.claimId}`,
     `Session ID: ${context.sessionId}`,
     `Address: ${context.address}`,
+    `X profile: ${context.xProfile}`,
     `Amount: ${context.amount.toLocaleString("en-US")} FPOM`,
     `Verification: ${context.verificationMode}`,
     context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
@@ -185,6 +204,7 @@ function formatSlackManualReviewMessage(context: PayoutContext): string {
     `Claim ID: ${context.claimId}`,
     `Session ID: ${context.sessionId}`,
     `Address: ${context.address}`,
+    `X profile: ${context.xProfile}`,
     `Amount: ${context.amount.toLocaleString("en-US")} FPOM`,
     `Verification: ${context.verificationMode}`,
     context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
@@ -340,9 +360,13 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     }
 
     const { sessionId, address, verificationMode } = parsed.data;
+    const normalizedXProfile = normalizeXProfileUrl(parsed.data.xProfile);
 
     if (!isLikelyMassaAddress(address)) {
       return reply.code(400).send({ error: "invalid_address" });
+    }
+    if (!normalizedXProfile) {
+      return reply.code(400).send({ error: "invalid_x_profile" });
     }
 
     const session = await prisma.session.findUnique({ where: { id: sessionId } });
@@ -359,6 +383,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         address: existingClaim.address,
         payload: {
           status: existingClaim.status,
+          xProfile: existingClaim.xProfile,
         },
       });
 
@@ -389,7 +414,36 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         },
       });
 
-      return reply.code(409).send({ error: "limit_reached", maxClaimsPerAddress: config.maxClaimsPerAddress });
+      return reply.code(409).send({
+        error: "limit_reached",
+        limitType: "address",
+        maxClaimsPerAddress: config.maxClaimsPerAddress,
+      });
+    }
+
+    const paidCountByXProfile = await prisma.claim.count({
+      where: {
+        xProfile: normalizedXProfile,
+        status: CLAIM_STATUSES.PAID,
+      },
+    });
+    if (paidCountByXProfile >= config.maxClaimsPerXProfile) {
+      await writeAuditLog({
+        level: "WARN",
+        event: "CLAIM_REJECTED_X_PROFILE_LIMIT_REACHED",
+        sessionId,
+        address,
+        payload: {
+          xProfile: normalizedXProfile,
+          maxClaimsPerXProfile: config.maxClaimsPerXProfile,
+        },
+      });
+
+      return reply.code(409).send({
+        error: "limit_reached",
+        limitType: "x_profile",
+        maxClaimsPerXProfile: config.maxClaimsPerXProfile,
+      });
     }
 
     const run = normalizeRunSummary(parsed.data.run);
@@ -435,6 +489,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       data: {
         sessionId,
         address,
+        xProfile: normalizedXProfile,
         verificationMode,
         amount: scoreServer,
         challenge,
@@ -452,6 +507,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       payload: {
         verificationMode,
         amount: scoreServer,
+        xProfile: normalizedXProfile,
       },
     });
 
@@ -488,6 +544,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         reason,
         amount: claim.amount,
         verificationMode: claim.verificationMode,
+        xProfile: claim.xProfile,
       },
     });
 
@@ -499,6 +556,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         claimId: claim.id,
         sessionId: claim.sessionId,
         address: claim.address,
+        xProfile: safeXProfile(claim.xProfile),
         amount: claim.amount,
         verificationMode: claim.verificationMode,
         riskScore: run?.riskScore ?? null,
@@ -596,6 +654,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           txHash,
           amount: claim.amount,
           verificationMode: claim.verificationMode,
+          xProfile: claim.xProfile,
         },
       });
 
@@ -606,6 +665,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           claimId: claim.id,
           sessionId: claim.sessionId,
           address: claim.address,
+          xProfile: safeXProfile(claim.xProfile),
           amount: claim.amount,
           verificationMode: claim.verificationMode,
           riskScore: run?.riskScore ?? null,
@@ -714,14 +774,23 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
       return reply.code(400).send({ error: "run_not_eligible" });
     }
+    if (!claim.xProfile) {
+      return markAsManualReview(parsed.data, "missing_x_profile");
+    }
 
     const now = new Date();
     const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    const [paidCountForAddress, ipClaims24h, fpClaims24h] = await Promise.all([
+    const [paidCountForAddress, paidCountForXProfile, ipClaims24h, fpClaims24h] = await Promise.all([
       prisma.claim.count({
         where: {
           address: claim.address,
+          status: CLAIM_STATUSES.PAID,
+        },
+      }),
+      prisma.claim.count({
+        where: {
+          xProfile: claim.xProfile,
           status: CLAIM_STATUSES.PAID,
         },
       }),
@@ -763,7 +832,33 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         },
       });
 
-      return reply.code(409).send({ error: "limit_reached", maxClaimsPerAddress: config.maxClaimsPerAddress });
+      return reply.code(409).send({
+        error: "limit_reached",
+        limitType: "address",
+        maxClaimsPerAddress: config.maxClaimsPerAddress,
+      });
+    }
+
+    if (paidCountForXProfile >= config.maxClaimsPerXProfile) {
+      await prisma.claim.update({ where: { id: claim.id }, data: { status: CLAIM_STATUSES.REJECTED } });
+
+      await writeAuditLog({
+        level: "WARN",
+        event: "CLAIM_REJECTED_X_PROFILE_LIMIT_REACHED",
+        claimId: claim.id,
+        sessionId: claim.sessionId,
+        address: claim.address,
+        payload: {
+          xProfile: claim.xProfile,
+          maxClaimsPerXProfile: config.maxClaimsPerXProfile,
+        },
+      });
+
+      return reply.code(409).send({
+        error: "limit_reached",
+        limitType: "x_profile",
+        maxClaimsPerXProfile: config.maxClaimsPerXProfile,
+      });
     }
 
     let risk = 0;
@@ -794,6 +889,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       payload: {
         verificationMode: claim.verificationMode,
         risk,
+        xProfile: claim.xProfile,
         ipClaims24h,
         fpClaims24h,
       },
@@ -818,6 +914,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       address: claim.address,
       payload: {
         verificationMode: claim.verificationMode,
+        xProfile: safeXProfile(claim.xProfile),
       },
     });
 
@@ -841,6 +938,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return {
       claimId: claim.id,
       address: claim.address,
+      xProfile: claim.xProfile,
       amount: claim.amount,
       status: claim.status,
       txHash: claim.txHash,
@@ -871,8 +969,10 @@ async function bootstrap() {
       maxSinglePayoutAmount: config.maxSinglePayoutAmount,
       maxPayoutsPerDay: config.maxPayoutsPerDay,
       maxClaimsPerAddress: config.maxClaimsPerAddress,
+      maxClaimsPerXProfile: config.maxClaimsPerXProfile,
       fpomContractAddress: config.fpomContractAddress,
       slackWebhookConfigured: Boolean(config.slackWebhookUrl),
+      corsAllowedOrigins: config.corsAllowedOrigins,
     },
     "FPOM rewards backend started",
   );

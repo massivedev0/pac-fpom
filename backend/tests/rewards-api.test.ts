@@ -14,6 +14,7 @@ const BASE_CONFIG: AppConfig = {
   maxPayoutsPerDay: 50,
   slackWebhookUrl: "",
   maxClaimsPerAddress: 2,
+  maxClaimsPerXProfile: 2,
   ipClaimsPerDayLimit: 10,
   minRunDurationMs: 45_000,
   maxRunDurationMs: 900_000,
@@ -99,12 +100,24 @@ async function confirmClaim(app: ReturnType<typeof createApp>, payload: Record<s
   return response;
 }
 
-async function createPaidClaim(app: ReturnType<typeof createApp>, address = VALID_ADDRESS) {
+let xProfileSequence = 0;
+
+function nextXProfile(): string {
+  xProfileSequence += 1;
+  return `https://x.com/fpomplayer${xProfileSequence}`;
+}
+
+async function createPaidClaim(
+  app: ReturnType<typeof createApp>,
+  address = VALID_ADDRESS,
+  xProfile = nextXProfile(),
+) {
   const session = await startSession(app);
 
   const prepareResponse = await prepareClaim(app, {
     sessionId: session.sessionId,
     address,
+    xProfile,
     verificationMode: "address_only",
     run: WINNING_RUN,
   });
@@ -163,6 +176,7 @@ test("same address should not exceed two paid claims", async () => {
     const thirdPrepare = await prepareClaim(context.app, {
       sessionId: session.sessionId,
       address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
       verificationMode: "address_only",
       run: WINNING_RUN,
     });
@@ -184,6 +198,7 @@ test("wallet_signature mode should require signature on confirm", async () => {
     const prepareResponse = await prepareClaim(context.app, {
       sessionId: session.sessionId,
       address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
       verificationMode: "wallet_signature",
       run: WINNING_RUN,
     });
@@ -212,6 +227,7 @@ test("claim prepare should reject non-winning run", async () => {
     const prepareResponse = await prepareClaim(context.app, {
       sessionId: session.sessionId,
       address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
       verificationMode: "address_only",
       run: {
         ...WINNING_RUN,
@@ -238,6 +254,7 @@ test("claim should go to manual review when payout exceeds single amount limit",
     const prepareResponse = await prepareClaim(context.app, {
       sessionId: session.sessionId,
       address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
       verificationMode: "address_only",
       run: {
         ...WINNING_RUN,
@@ -274,6 +291,7 @@ test("claim should go to manual review when daily payout limit is reached", asyn
     const prepare2 = await prepareClaim(context.app, {
       sessionId: session2.sessionId,
       address: "AU9XGDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+      xProfile: nextXProfile(),
       verificationMode: "address_only",
       run: WINNING_RUN,
     });
@@ -289,6 +307,32 @@ test("claim should go to manual review when daily payout limit is reached", asyn
     const body2 = confirm2.json() as { status: string; reason: string };
     assert.equal(body2.status, "MANUAL_REVIEW");
     assert.match(body2.reason, /daily_payout_limit_exceeded/);
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("same x profile should not exceed two paid claims", async () => {
+  const context = await createTestContext();
+
+  try {
+    const xProfile = "https://x.com/fpompromo";
+    await createPaidClaim(context.app, "AU12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib", xProfile);
+    await createPaidClaim(context.app, "AU9XGDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib", xProfile);
+
+    const session = await startSession(context.app);
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: "AU77GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+      xProfile,
+      verificationMode: "address_only",
+      run: WINNING_RUN,
+    });
+
+    assert.equal(prepareResponse.statusCode, 409);
+    const body = prepareResponse.json() as { error: string; limitType: string };
+    assert.equal(body.error, "limit_reached");
+    assert.equal(body.limitType, "x_profile");
   } finally {
     await context.cleanup();
   }

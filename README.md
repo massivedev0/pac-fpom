@@ -34,6 +34,7 @@ After round win the game can submit reward claims to backend API
 - Override with query param: `?rewardsApi=https://your-backend.example`
 - Override with global variable before `game.js`: `window.__FPOM_REWARDS_API__ = "https://your-backend.example"`
 - Debug shortcut button `Victory` is visible only on localhost with `?dev=1`
+- Claim form requires Massa address (or wallet connect) and X profile URL in format `https://x.com/account`
 
 Backend quick run:
 

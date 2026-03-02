@@ -57,6 +57,7 @@ model Claim {
   id               String   @id @default(cuid())
   sessionId        String   @unique
   address          String
+  xProfile         String?
   verificationMode String
   amount           Int
   challenge        String
@@ -72,6 +73,7 @@ model Claim {
   payoutJob PayoutJob?
 
   @@index([address])
+  @@index([xProfile])
   @@index([status])
   @@index([createdAt])
   @@index([ipHash])

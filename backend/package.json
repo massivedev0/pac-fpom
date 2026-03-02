@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run prisma:generate && tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "npm run prisma:sync && tsx --test --test-concurrency=1 tests/**/*.test.ts",
     "logs": "tsx scripts/show-logs.ts",
