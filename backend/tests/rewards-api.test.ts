@@ -101,6 +101,29 @@ async function confirmClaim(app: ReturnType<typeof createApp>, payload: Record<s
   return response;
 }
 
+async function pushSessionEvents(
+  app: ReturnType<typeof createApp>,
+  sessionId: string,
+  count = 12,
+) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/session/event",
+    payload: {
+      sessionId,
+      startSeq: 0,
+      events: Array.from({ length: count }, (_, idx) => ({
+        type: "tick",
+        idx,
+      })),
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json() as { accepted: number };
+  assert.equal(body.accepted, count);
+}
+
 let xProfileSequence = 0;
 
 function nextXProfile(): string {
@@ -258,6 +281,37 @@ test("claim prepare should reject non-winning run", async () => {
     assert.equal(prepareResponse.statusCode, 400);
     const body = prepareResponse.json() as { error: string };
     assert.equal(body.error, "round_not_won");
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("address_only claim with session events should keep low risk score", async () => {
+  const context = await createTestContext();
+
+  try {
+    const session = await startSession(context.app);
+    await pushSessionEvents(context.app, session.sessionId, 10);
+
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      run: WINNING_RUN,
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string };
+
+    const confirmResponse = await confirmClaim(context.app, {
+      claimId: prepared.claimId,
+    });
+
+    assert.equal(confirmResponse.statusCode, 200);
+    const run = await context.prisma.run.findUnique({ where: { sessionId: session.sessionId } });
+    assert.ok(run);
+    assert.equal(run.riskScore, 2);
   } finally {
     await context.cleanup();
   }

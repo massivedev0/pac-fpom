@@ -37,6 +37,7 @@ After round win the game can submit reward claims to backend API
 - Optional promo tweet override: `?promoTweet=https://x.com/account/status/123`
 - Debug shortcut button `Victory` is visible only on localhost with `?dev=1`
 - Claim form requires Massa address (or wallet connect) and X profile URL in format `https://x.com/account`
+- Before claim confirm, frontend uploads buffered run telemetry to `POST /session/event`
 
 Backend quick run:
 

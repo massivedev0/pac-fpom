@@ -25,6 +25,9 @@ const REWARDS_API_TIMEOUT_MS = 11_000;
 const DEFAULT_LOCAL_API = "http://127.0.0.1:8787";
 const DEFAULT_DEBUG_WIN_SCORE = 106_050;
 const DEFAULT_X_PROMO_TWEET = "https://x.com/massalabs";
+const SESSION_EVENTS_BATCH_SIZE = 64;
+const SESSION_EVENTS_BUFFER_LIMIT = 1200;
+const SESSION_RETRY_DELAY_MS = 2500;
 
 const SCORE_VALUES = {
   // Tuned so a full clear gives ~100k points (without heavy enemy farming).
@@ -99,6 +102,11 @@ const STATE = {
     promoOverrideLocked: false,
     promoConfigFetchTried: false,
     sessionId: null,
+    sessionRetryAtMs: 0,
+    nextEventSeq: 0,
+    eventBuffer: [],
+    eventOverflow: false,
+    eventFlushInFlight: false,
     claimInFlight: false,
     claimStatusText: "",
     connectedAddress: "",
@@ -436,7 +444,68 @@ function maybeSyncPromoTweetFromBackend() {
   syncPromoTweetFromBackend().catch(() => {});
 }
 
-async function ensureRewardsSession() {
+function getRunElapsedMs() {
+  if (!STATE.runStats.startedAtMs) {
+    return 0;
+  }
+  return Math.max(1, Math.floor(performance.now() - STATE.runStats.startedAtMs));
+}
+
+function queueSessionEvent(type, payload = {}) {
+  if (!STATE.rewards.apiBase) {
+    return;
+  }
+
+  if (STATE.rewards.eventBuffer.length >= SESSION_EVENTS_BUFFER_LIMIT) {
+    STATE.rewards.eventOverflow = true;
+    STATE.rewards.eventBuffer.shift();
+  }
+
+  STATE.rewards.eventBuffer.push({
+    type,
+    atMs: getRunElapsedMs(),
+    score: STATE.score,
+    payload,
+  });
+}
+
+async function flushSessionEvents(force = false) {
+  if (!STATE.rewards.apiBase) {
+    return;
+  }
+  if (STATE.rewards.eventFlushInFlight) {
+    return;
+  }
+  if (STATE.rewards.eventBuffer.length === 0) {
+    return;
+  }
+
+  STATE.rewards.eventFlushInFlight = true;
+  try {
+    const sessionId = await ensureRewardsSession(force);
+    if (!sessionId) {
+      if (force) {
+        throw new Error("session_unavailable");
+      }
+      return;
+    }
+
+    while (STATE.rewards.eventBuffer.length > 0) {
+      const batch = STATE.rewards.eventBuffer.slice(0, SESSION_EVENTS_BATCH_SIZE);
+      await apiPost("/session/event", {
+        sessionId,
+        startSeq: STATE.rewards.nextEventSeq,
+        events: batch,
+      });
+      STATE.rewards.eventBuffer.splice(0, batch.length);
+      STATE.rewards.nextEventSeq += batch.length;
+    }
+  } finally {
+    STATE.rewards.eventFlushInFlight = false;
+  }
+}
+
+async function ensureRewardsSession(force = false) {
   if (STATE.rewards.sessionId) {
     return STATE.rewards.sessionId;
   }
@@ -444,13 +513,24 @@ async function ensureRewardsSession() {
     return null;
   }
 
-  const session = await apiPost("/session/start", { fingerprint: getFingerprint() });
-  STATE.rewards.sessionId = session.sessionId;
-  return STATE.rewards.sessionId;
+  const now = performance.now();
+  if (!force && STATE.rewards.sessionRetryAtMs > now) {
+    return null;
+  }
+
+  try {
+    const session = await apiPost("/session/start", { fingerprint: getFingerprint() });
+    STATE.rewards.sessionId = session.sessionId;
+    STATE.rewards.sessionRetryAtMs = 0;
+    return STATE.rewards.sessionId;
+  } catch (error) {
+    STATE.rewards.sessionRetryAtMs = now + SESSION_RETRY_DELAY_MS;
+    throw error;
+  }
 }
 
 function getRunSummary() {
-  const durationMs = Math.max(1, Math.floor(performance.now() - STATE.runStats.startedAtMs));
+  const durationMs = getRunElapsedMs();
   return {
     won: STATE.mode === "won",
     durationMs,
@@ -458,6 +538,8 @@ function getRunSummary() {
     powerPelletsEaten: STATE.runStats.powerPelletsEaten,
     enemiesEaten: STATE.runStats.enemiesEaten,
     finalScoreClient: STATE.score,
+    telemetryEventsTotal: STATE.rewards.nextEventSeq + STATE.rewards.eventBuffer.length,
+    telemetryOverflow: STATE.rewards.eventOverflow,
   };
 }
 
@@ -480,6 +562,11 @@ function triggerDebugVictory() {
   }
   STATE.score = Math.max(STATE.score, DEFAULT_DEBUG_WIN_SCORE);
   STATE.mode = "won";
+  queueSessionEvent("run_won", {
+    source: "debug_button",
+    finalScore: STATE.score,
+    durationMs: getRunElapsedMs(),
+  });
   setClaimStatus("Debug victory enabled: submit reward claim");
   showOverlay("FPOM Wins", "Play Again");
 }
@@ -570,9 +657,18 @@ function startNewGame() {
   STATE.runStats.powerPelletsEaten = 0;
   STATE.runStats.enemiesEaten = 0;
   STATE.rewards.sessionId = null;
+  STATE.rewards.sessionRetryAtMs = 0;
+  STATE.rewards.nextEventSeq = 0;
+  STATE.rewards.eventBuffer = [];
+  STATE.rewards.eventOverflow = false;
+  STATE.rewards.eventFlushInFlight = false;
   STATE.maze = MAZE_TEMPLATE.map((row) => row.split(""));
   initMaze();
   resetEntities();
+  queueSessionEvent("run_started", {
+    lives: STATE.lives,
+    pelletsLeft: STATE.pelletsLeft,
+  });
   setClaimStatus("");
   if (rewardPanel) {
     rewardPanel.hidden = true;
@@ -837,6 +933,9 @@ function updateEffects(dt) {
 
 function eatPellets() {
   const player = STATE.player;
+  let pelletsEatenThisTick = 0;
+  let powerPelletsEatenThisTick = 0;
+
   for (const pellet of STATE.pellets) {
     if (pellet.eaten) continue;
     const center = tileCenter(pellet.col, pellet.row);
@@ -845,6 +944,7 @@ function eatPellets() {
       pellet.eaten = true;
       STATE.pelletsLeft -= 1;
       if (pellet.power) {
+        powerPelletsEatenThisTick += 1;
         STATE.runStats.powerPelletsEaten += 1;
         STATE.score += SCORE_VALUES.POWER_PELLET;
         STATE.powerTimer = 8;
@@ -852,6 +952,7 @@ function eatPellets() {
         playTone(620, 0.08, "triangle", 0.05);
         playTone(860, 0.11, "triangle", 0.045);
       } else {
+        pelletsEatenThisTick += 1;
         STATE.runStats.pelletsEaten += 1;
         STATE.score += SCORE_VALUES.PELLET;
         playTone(250, 0.04, "square", 0.02);
@@ -859,9 +960,25 @@ function eatPellets() {
     }
   }
 
+  if (pelletsEatenThisTick > 0 || powerPelletsEatenThisTick > 0) {
+    queueSessionEvent("pellet_eaten", {
+      pellets: pelletsEatenThisTick,
+      powerPellets: powerPelletsEatenThisTick,
+      pelletsLeft: STATE.pelletsLeft,
+    });
+  }
+
   if (STATE.pelletsLeft <= 0) {
     STATE.score += SCORE_VALUES.ROUND_CLEAR_BONUS;
     STATE.mode = "won";
+    queueSessionEvent("run_won", {
+      finalScore: STATE.score,
+      durationMs: getRunElapsedMs(),
+      pelletsEaten: STATE.runStats.pelletsEaten,
+      powerPelletsEaten: STATE.runStats.powerPelletsEaten,
+      enemiesEaten: STATE.runStats.enemiesEaten,
+      telemetryOverflow: STATE.rewards.eventOverflow,
+    });
     if (!STATE.rewards.apiBase) {
       setClaimStatus("Rewards API is not configured for this host");
     } else {
@@ -891,15 +1008,26 @@ function handleEnemyCollisions() {
       STATE.runStats.enemiesEaten += 1;
       STATE.combo += 1;
       STATE.score += SCORE_VALUES.ENEMY_BASE + STATE.combo * SCORE_VALUES.ENEMY_COMBO_STEP;
+      queueSessionEvent("enemy_eaten", {
+        enemyType: enemy.type,
+        combo: STATE.combo,
+      });
       playTone(700, 0.06, "square", 0.04);
       playTone(920, 0.08, "triangle", 0.035);
     } else {
       spawnShatterEffect(player.x, player.y, player.r * 2.4, "fpom", 24);
       player.alive = false;
       STATE.lives -= 1;
+      queueSessionEvent("life_lost", {
+        livesLeft: STATE.lives,
+      });
       playTone(180, 0.22, "sawtooth", 0.05);
       if (STATE.lives <= 0) {
         STATE.mode = "gameover";
+        queueSessionEvent("run_lost", {
+          finalScore: STATE.score,
+          durationMs: getRunElapsedMs(),
+        });
         showOverlay("Game Over", "Try Again");
       } else {
         STATE.roundResetTimer = 0.95;
@@ -1247,12 +1375,20 @@ function renderGameToText() {
 
 function handleDirectionInput(dir) {
   if (!STATE.player) return;
+  if (STATE.player.desiredDir !== dir) {
+    queueSessionEvent("input_direction", {
+      dir,
+    });
+  }
   STATE.player.desiredDir = dir;
 }
 
 function togglePause() {
   if (STATE.mode !== "playing") return;
   STATE.paused = !STATE.paused;
+  queueSessionEvent("pause_toggled", {
+    paused: STATE.paused,
+  });
 }
 
 async function toggleFullscreen() {
@@ -1307,11 +1443,21 @@ async function submitRewardClaim() {
   setClaimStatus("Preparing claim...");
 
   try {
-    const sessionId = await ensureRewardsSession();
+    queueSessionEvent("claim_submit", {
+      verificationMode,
+      xProfile: normalizedXProfile,
+      telemetryOverflow: STATE.rewards.eventOverflow,
+    });
+
+    setClaimStatus("Uploading run telemetry...");
+    await flushSessionEvents(true);
+
+    const sessionId = await ensureRewardsSession(true);
     if (!sessionId) {
       throw new Error("session_unavailable");
     }
 
+    setClaimStatus("Preparing claim...");
     const prepared = await apiPost("/claim/prepare", {
       sessionId,
       address: claimAddress,

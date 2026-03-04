@@ -784,7 +784,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     const now = new Date();
     const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    const [paidCountForAddress, paidCountForXProfile, ipClaims24h, fpClaims24h] = await Promise.all([
+    const [paidCountForAddress, paidCountForXProfile, ipClaims24h, fpClaims24h, sessionEventsCount] = await Promise.all([
       prisma.claim.count({
         where: {
           address: claim.address,
@@ -819,6 +819,11 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
             },
           })
         : Promise.resolve(0),
+      prisma.sessionEvent.count({
+        where: {
+          sessionId: claim.sessionId,
+        },
+      }),
     ]);
 
     if (paidCountForAddress >= config.maxClaimsPerAddress) {
@@ -874,6 +879,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     if (fpClaims24h >= 3) {
       risk += 3;
     }
+    if (sessionEventsCount === 0) {
+      risk += 2;
+    } else if (sessionEventsCount < 5) {
+      risk += 1;
+    }
+    if (sessionEventsCount > 5000) {
+      risk += 2;
+    }
     if (run.durationMs < config.minRunDurationMs || run.durationMs > config.maxRunDurationMs) {
       risk += 3;
     }
@@ -895,6 +908,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         xProfile: claim.xProfile,
         ipClaims24h,
         fpClaims24h,
+        sessionEventsCount,
       },
     });
 
