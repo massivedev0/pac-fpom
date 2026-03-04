@@ -17,33 +17,26 @@
     <main class="layout">
       <section class="game-shell" aria-label="FPOM game shell">
         <canvas id="game-canvas" width="960" height="640"></canvas>
+        <button id="top-wallet-btn" class="top-wallet-btn" type="button">Connect Wallet</button>
         <button id="dev-win-btn" class="dev-win-btn" type="button" hidden>Victory</button>
+        <div id="wallet-modal" class="wallet-modal" hidden>
+          <div class="wallet-modal-card" role="dialog" aria-modal="true" aria-label="Connect wallet">
+            <button id="wallet-modal-close" class="wallet-modal-close" type="button" aria-label="Close wallet modal">
+              x
+            </button>
+            <h2>Connect Wallet</h2>
+            <p id="wallet-modal-subtitle" class="wallet-modal-subtitle" hidden></p>
+            <div id="wallet-options" class="wallet-options"></div>
+          </div>
+        </div>
         <div class="menu-overlay" id="menu-overlay">
           <img class="overlay-logo" src="./assets/fpom/fpom-logo-transparent.png" alt="FPOM logo" />
           <h1>FPOM Meme Hunt</h1>
           <p class="subtitle">No more scams. Gimme a serious fake.</p>
           <div id="reward-panel" class="reward-panel" hidden>
             <p id="reward-summary" class="reward-summary">Round reward: 0 FPOM</p>
-            <label class="reward-label" for="claim-mode">Claim mode</label>
-            <select id="claim-mode" class="reward-input">
-              <option value="wallet_signature">Connect wallet (recommended)</option>
-              <option value="address_only">Address only</option>
-            </select>
-            <div id="wallet-connect-row" class="reward-row" hidden>
-              <button id="wallet-connect-btn" class="wallet-connect-btn" type="button">Connect Massa Wallet</button>
-              <p id="wallet-status" class="wallet-status">Wallet not connected</p>
-            </div>
-            <div id="address-row" class="reward-row">
-              <label class="reward-label" for="claim-address">Massa address</label>
-              <input
-                id="claim-address"
-                class="reward-input"
-                type="text"
-                inputmode="text"
-                autocomplete="off"
-                placeholder="AU... / AS..."
-                maxlength="160"
-              />
+            <div id="wallet-connect-row" class="reward-row">
+              <p id="wallet-status" class="wallet-status">Use the Connect Wallet button in the top-right corner</p>
             </div>
             <p class="reward-note">
               To claim rewards, complete Like + Retweet of

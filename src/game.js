@@ -2,16 +2,16 @@ const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
 const startButton = document.getElementById("start-btn");
 const menuOverlay = document.getElementById("menu-overlay");
+const topWalletButton = document.getElementById("top-wallet-btn");
+const walletModal = document.getElementById("wallet-modal");
+const walletModalClose = document.getElementById("wallet-modal-close");
+const walletModalSubtitle = document.getElementById("wallet-modal-subtitle");
+const walletOptions = document.getElementById("wallet-options");
 const rewardPanel = document.getElementById("reward-panel");
 const rewardSummary = document.getElementById("reward-summary");
 const promoTweetLink = document.getElementById("promo-tweet-link");
-const claimModeSelect = document.getElementById("claim-mode");
-const claimAddressInput = document.getElementById("claim-address");
 const xProfileInput = document.getElementById("x-profile");
-const walletConnectRow = document.getElementById("wallet-connect-row");
-const walletConnectButton = document.getElementById("wallet-connect-btn");
 const walletStatus = document.getElementById("wallet-status");
-const addressRow = document.getElementById("address-row");
 const claimButton = document.getElementById("claim-btn");
 const claimStatus = document.getElementById("claim-status");
 const devWinButton = document.getElementById("dev-win-btn");
@@ -28,6 +28,9 @@ const DEFAULT_X_PROMO_TWEET = "https://x.com/massalabs";
 const SESSION_EVENTS_BATCH_SIZE = 64;
 const SESSION_EVENTS_BUFFER_LIMIT = 1200;
 const SESSION_RETRY_DELAY_MS = 2500;
+const WALLET_CONNECT_TIMEOUT_MS = 9000;
+const WALLET_PROVIDER_MODULE_URL = "https://cdn.jsdelivr.net/npm/@massalabs/wallet-provider@3.3.0/+esm";
+const CLAIM_VERIFICATION_MODE = "wallet_signature";
 
 const SCORE_VALUES = {
   // Tuned so a full clear gives ~100k points (without heavy enemy farming).
@@ -109,9 +112,12 @@ const STATE = {
     eventFlushInFlight: false,
     claimInFlight: false,
     claimStatusText: "",
+    walletProviders: [],
     connectedAddress: "",
     walletProviderName: "",
     walletProvider: null,
+    walletAccount: null,
+    walletModalInFlight: false,
   },
 };
 
@@ -129,6 +135,7 @@ let audioCtx = null;
 let animationFrame = null;
 let lastTs = 0;
 let accumulator = 0;
+let walletProviderModulePromise = null;
 
 function loadImage(src) {
   const img = new Image();
@@ -194,15 +201,6 @@ function setClaimControlsDisabled(disabled) {
   if (claimButton) {
     claimButton.disabled = disabled;
   }
-  if (claimModeSelect) {
-    claimModeSelect.disabled = disabled;
-  }
-  if (claimAddressInput) {
-    claimAddressInput.disabled = disabled;
-  }
-  if (walletConnectButton) {
-    walletConnectButton.disabled = disabled;
-  }
   if (xProfileInput) {
     xProfileInput.disabled = disabled;
   }
@@ -214,15 +212,35 @@ function setWalletStatus(text) {
   }
 }
 
-function updateClaimModeUI() {
-  const mode = claimModeSelect ? claimModeSelect.value : "wallet_signature";
-  const isWalletMode = mode === "wallet_signature";
-  if (walletConnectRow) {
-    walletConnectRow.hidden = !isWalletMode;
+function updateWalletStatusForClaimPanel() {
+  const connectedAddress = STATE.rewards.connectedAddress || "";
+  if (isValidMassaAddress(connectedAddress)) {
+    const walletName = STATE.rewards.walletProviderName || "Wallet";
+    setWalletStatus(`${walletName} connected: ${connectedAddress}`);
+    return;
   }
-  if (addressRow) {
-    addressRow.hidden = isWalletMode;
+  setWalletStatus("Use the Connect Wallet button in the top-right corner");
+}
+
+function updateTopWalletButton() {
+  if (!topWalletButton) {
+    return;
   }
+
+  const connectedAddress = STATE.rewards.connectedAddress;
+  if (!connectedAddress) {
+    topWalletButton.classList.remove("connected");
+    topWalletButton.textContent = "Connect Wallet";
+    return;
+  }
+
+  const shortAddress =
+    connectedAddress.length > 18
+      ? `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-6)}`
+      : connectedAddress;
+
+  topWalletButton.classList.add("connected");
+  topWalletButton.textContent = `${STATE.rewards.walletProviderName || "Wallet"}: ${shortAddress}`;
 }
 
 function normalizeXProfile(input) {
@@ -280,7 +298,135 @@ function normalizeAddressResult(value) {
   return "";
 }
 
-async function requestProviderAddress(provider) {
+function normalizeSignatureResult(value) {
+  if (!value) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "object") {
+    if (typeof value.signature === "string" && value.signature.trim()) {
+      return value.signature.trim();
+    }
+    if (typeof value.result === "string" && value.result.trim()) {
+      return value.result.trim();
+    }
+    if (typeof value.signedMessage === "string" && value.signedMessage.trim()) {
+      return value.signedMessage.trim();
+    }
+    return JSON.stringify(value);
+  }
+  return "";
+}
+
+function walletNameToLabel(rawName) {
+  const normalized = String(rawName || "").toLowerCase();
+  if (normalized.includes("massa")) {
+    return "Massa Wallet";
+  }
+  if (normalized.includes("bearby")) {
+    return "Bearby";
+  }
+  if (normalized.includes("meta")) {
+    return "MetaMask";
+  }
+  return String(rawName || "Wallet");
+}
+
+function walletNameToId(rawName) {
+  const normalized = String(rawName || "wallet")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || "wallet";
+}
+
+function withTimeout(promise, timeoutMs, timeoutCode = "operation_timeout") {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(timeoutCode));
+    }, timeoutMs);
+
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
+async function loadWalletProviderModule() {
+  if (walletProviderModulePromise) {
+    return walletProviderModulePromise;
+  }
+
+  walletProviderModulePromise = import(WALLET_PROVIDER_MODULE_URL).catch((error) => {
+    walletProviderModulePromise = null;
+    throw error;
+  });
+
+  return walletProviderModulePromise;
+}
+
+function detectLegacyWalletProviders() {
+  return [
+    {
+      id: "legacy:massa_wallet",
+      name: "Massa Wallet",
+      source: "legacy",
+      provider: window.massaWallet || window.massa || window.massaWalletProvider,
+    },
+    {
+      id: "legacy:bearby",
+      name: "Bearby",
+      source: "legacy",
+      provider: window.bearby || window.bearbyWallet || window.web3?.wallet || window.web3,
+    },
+  ].filter((item) => item.provider);
+}
+
+async function detectWalletProviders() {
+  const candidates = [];
+
+  try {
+    const module = await loadWalletProviderModule();
+    if (typeof module?.getWallets === "function") {
+      const wallets = await module.getWallets();
+      wallets.forEach((wallet, index) => {
+        const rawName = typeof wallet?.name === "function" ? wallet.name() : "";
+        const label = walletNameToLabel(rawName);
+        const safeId = walletNameToId(rawName);
+        candidates.push({
+          id: `sdk:${safeId}:${index}`,
+          name: label,
+          source: "wallet_provider",
+          wallet,
+        });
+      });
+    }
+  } catch {
+    // Fallback to legacy window-based providers.
+  }
+
+  const seen = new Set(candidates.map((entry) => entry.name.toLowerCase()));
+  for (const legacyProvider of detectLegacyWalletProviders()) {
+    const dedupeKey = legacyProvider.name.toLowerCase();
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+    seen.add(dedupeKey);
+    candidates.push(legacyProvider);
+  }
+
+  return candidates;
+}
+
+async function requestLegacyProviderAddress(provider) {
   const attempts = [
     async () => provider?.request?.({ method: "massa_requestAccounts" }),
     async () => provider?.request?.({ method: "wallet_requestAccounts" }),
@@ -306,34 +452,277 @@ async function requestProviderAddress(provider) {
   return "";
 }
 
-function detectWalletProviders() {
-  return [
-    { name: "Massa Wallet", provider: window.massaWallet || window.massa },
-    { name: "Bearby", provider: window.bearby || window.bearbyWallet },
-  ].filter((item) => item.provider);
+async function requestWalletProviderAccounts(wallet) {
+  if (!wallet) {
+    return [];
+  }
+
+  try {
+    if (typeof wallet.connect === "function") {
+      await wallet.connect();
+    }
+  } catch {
+    // Keep going and still try to read accounts.
+  }
+
+  try {
+    const accounts = await wallet.accounts();
+    if (!Array.isArray(accounts)) {
+      return [];
+    }
+
+    const seen = new Set();
+    const accountOptions = [];
+    for (const account of accounts) {
+      const address = normalizeAddressResult(account).trim();
+      if (!isValidMassaAddress(address)) {
+        continue;
+      }
+      if (seen.has(address)) {
+        continue;
+      }
+      seen.add(address);
+      accountOptions.push({ address, account });
+    }
+    return accountOptions;
+  } catch {
+    return [];
+  }
 }
 
-async function connectWalletAddress() {
-  const candidates = detectWalletProviders();
+async function refreshWalletProviders() {
+  const candidates = await detectWalletProviders();
+  STATE.rewards.walletProviders = candidates;
+  return candidates;
+}
+
+function applyConnectedWallet(candidate, address, walletAccount = null) {
+  STATE.rewards.connectedAddress = address.trim();
+  STATE.rewards.walletProvider = candidate.wallet || candidate.provider || null;
+  STATE.rewards.walletAccount = walletAccount;
+  STATE.rewards.walletProviderName = candidate.name;
+  updateWalletStatusForClaimPanel();
+  updateTopWalletButton();
+  closeWalletModal();
+}
+
+function setWalletModalPending(pending) {
+  STATE.rewards.walletModalInFlight = pending;
+  if (topWalletButton) {
+    topWalletButton.disabled = pending;
+  }
+  if (walletModalClose) {
+    walletModalClose.disabled = pending;
+  }
+  if (walletOptions) {
+    const actionButtons = walletOptions.querySelectorAll("button, select");
+    for (const btn of actionButtons) {
+      btn.disabled = pending;
+    }
+  }
+}
+
+function setWalletModalSubtitle(text) {
+  if (!walletModalSubtitle) {
+    return;
+  }
+  const normalized = String(text || "").trim();
+  walletModalSubtitle.textContent = normalized;
+  walletModalSubtitle.hidden = normalized.length === 0;
+}
+
+function renderWalletAccountPicker(candidate, accountOptions) {
+  if (!walletOptions) {
+    return;
+  }
+
+  setWalletModalSubtitle("Choose Massa account");
+  walletOptions.textContent = "";
+
+  const select = document.createElement("select");
+  select.className = "wallet-account-select";
+  for (const option of accountOptions) {
+    const item = document.createElement("option");
+    item.value = option.address;
+    item.textContent = option.address;
+    select.append(item);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "wallet-picker-actions";
+
+  const backButton = document.createElement("button");
+  backButton.type = "button";
+  backButton.className = "wallet-picker-back-btn";
+  backButton.textContent = "Back";
+  backButton.addEventListener("click", () => {
+    openWalletModal().catch(() => {});
+  });
+
+  const connectButton = document.createElement("button");
+  connectButton.type = "button";
+  connectButton.className = "wallet-option-btn";
+  connectButton.textContent = "Connect selected";
+  connectButton.addEventListener("click", () => {
+    const selectedAddress = select.value;
+    const selectedAccount = accountOptions.find((item) => item.address === selectedAddress);
+    if (!selectedAccount) {
+      setClaimStatus("Select a valid wallet account");
+      return;
+    }
+
+    applyConnectedWallet(candidate, selectedAccount.address, selectedAccount.account);
+    setClaimStatus("Wallet connected. You can claim now");
+  });
+
+  actions.append(backButton, connectButton);
+  walletOptions.append(select, actions);
+  setWalletStatus("Massa Wallet: choose account");
+  setClaimStatus("Choose account and confirm");
+}
+
+function closeWalletModal() {
+  if (walletModal) {
+    walletModal.hidden = true;
+  }
+}
+
+async function openWalletModal() {
+  if (!walletModal || !walletOptions) {
+    return;
+  }
+
+  setWalletModalSubtitle("");
+  walletOptions.textContent = "";
+  setWalletModalPending(true);
+  walletModal.hidden = false;
+
+  const loading = document.createElement("p");
+  loading.className = "wallet-options-empty";
+  loading.textContent = "Searching available wallets...";
+  walletOptions.append(loading);
+
+  let candidates = [];
+  try {
+    candidates = await refreshWalletProviders();
+  } catch {
+    candidates = [];
+  }
+
+  walletOptions.textContent = "";
+  setWalletModalPending(false);
+
   if (candidates.length === 0) {
-    throw new Error("massa_wallet_not_found");
+    const empty = document.createElement("p");
+    empty.className = "wallet-options-empty";
+    empty.textContent = "No wallets found. Install/enable Massa Wallet or Bearby, then reload.";
+    walletOptions.append(empty);
+    updateWalletStatusForClaimPanel();
+    setClaimStatus("No wallets found. Install/enable Massa Wallet or Bearby, then reload.");
+    return;
   }
 
   for (const candidate of candidates) {
-    const address = await requestProviderAddress(candidate.provider);
-    if (isValidMassaAddress(address)) {
-      STATE.rewards.connectedAddress = address.trim();
-      STATE.rewards.walletProvider = candidate.provider;
-      STATE.rewards.walletProviderName = candidate.name;
-      setWalletStatus(`${candidate.name} connected: ${address}`);
-      return address;
-    }
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "wallet-option-btn";
+    btn.textContent = candidate.name;
+    btn.addEventListener("click", () => {
+      setClaimStatus(`Connecting ${candidate.name}...`);
+      connectWalletAddress(candidate.id)
+        .then((result) => {
+          if (result.status === "connected") {
+            setClaimStatus("Wallet connected. You can claim now");
+          }
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : "wallet_connect_failed";
+          setClaimStatus(`Wallet connection failed: ${message}`);
+        });
+    });
+    walletOptions.append(btn);
   }
 
-  throw new Error("wallet_connect_failed");
+  updateWalletStatusForClaimPanel();
+
+  walletModal.hidden = false;
+}
+
+async function connectWalletAddress(preferredWalletId = "") {
+  setWalletModalPending(true);
+  try {
+    const candidates = await refreshWalletProviders();
+    if (candidates.length === 0) {
+      throw new Error("massa_wallet_not_found");
+    }
+
+    const prioritizedCandidates = preferredWalletId
+      ? [
+          ...candidates.filter((candidate) => candidate.id === preferredWalletId),
+          ...candidates.filter((candidate) => candidate.id !== preferredWalletId),
+        ]
+      : candidates;
+
+    for (const candidate of prioritizedCandidates) {
+      try {
+        let address = "";
+        let walletAccount = null;
+
+        if (candidate.source === "wallet_provider") {
+          const connectedAccounts = await withTimeout(
+            requestWalletProviderAccounts(candidate.wallet),
+            WALLET_CONNECT_TIMEOUT_MS,
+            "wallet_connect_timeout",
+          );
+
+          if (candidate.name === "Massa Wallet" && connectedAccounts.length > 1) {
+            renderWalletAccountPicker(candidate, connectedAccounts);
+            return { status: "select_account" };
+          }
+
+          if (connectedAccounts.length > 0) {
+            address = connectedAccounts[0].address;
+            walletAccount = connectedAccounts[0].account;
+          }
+        } else {
+          address = await withTimeout(
+            requestLegacyProviderAddress(candidate.provider),
+            WALLET_CONNECT_TIMEOUT_MS,
+            "wallet_connect_timeout",
+          );
+        }
+
+        if (!isValidMassaAddress(address)) {
+          continue;
+        }
+
+        applyConnectedWallet(candidate, address, walletAccount);
+        return { status: "connected", address };
+      } catch {
+        // Try next provider if this one is unavailable or timed out.
+      }
+    }
+
+    throw new Error("wallet_connect_failed");
+  } finally {
+    setWalletModalPending(false);
+  }
 }
 
 async function signWithWallet(challenge) {
+  const account = STATE.rewards.walletAccount;
+  if (account && typeof account.sign === "function") {
+    try {
+      const signatureResult = await account.sign(new TextEncoder().encode(challenge));
+      const normalized = normalizeSignatureResult(signatureResult);
+      if (normalized) {
+        return normalized;
+      }
+    } catch {
+      // Fallback to provider-level methods below.
+    }
+  }
+
   const provider = STATE.rewards.walletProvider;
   if (!provider) {
     throw new Error("wallet_not_connected");
@@ -349,11 +738,9 @@ async function signWithWallet(challenge) {
   for (const method of methods) {
     try {
       const result = await method();
-      if (typeof result === "string" && result.trim()) {
-        return result.trim();
-      }
-      if (result && typeof result === "object") {
-        return JSON.stringify(result);
+      const normalized = normalizeSignatureResult(result);
+      if (normalized) {
+        return normalized;
       }
     } catch {
       // Keep trying known methods
@@ -1400,10 +1787,8 @@ async function toggleFullscreen() {
 }
 
 function readClaimForm() {
-  const verificationMode = claimModeSelect ? claimModeSelect.value : "wallet_signature";
-  const address = claimAddressInput ? claimAddressInput.value.trim() : "";
   const xProfile = xProfileInput ? xProfileInput.value.trim() : "";
-  return { verificationMode, address, xProfile };
+  return { xProfile };
 }
 
 async function submitRewardClaim() {
@@ -1416,26 +1801,19 @@ async function submitRewardClaim() {
     return;
   }
 
-  const { verificationMode, address, xProfile } = readClaimForm();
+  const { xProfile } = readClaimForm();
   const normalizedXProfile = normalizeXProfile(xProfile);
   if (!normalizedXProfile) {
     setClaimStatus("Enter X profile as https://x.com/account");
     return;
   }
 
-  let claimAddress = address;
+  const verificationMode = CLAIM_VERIFICATION_MODE;
+  const claimAddress = STATE.rewards.connectedAddress || "";
   let signature;
-  if (verificationMode === "wallet_signature") {
-    claimAddress = STATE.rewards.connectedAddress || "";
-    if (!isValidMassaAddress(claimAddress)) {
-      setClaimStatus("Connect wallet first to get a valid Massa address");
-      return;
-    }
-  } else {
-    if (!isValidMassaAddress(claimAddress)) {
-      setClaimStatus("Enter a valid Massa address (AU... / AS...)");
-      return;
-    }
+  if (!isValidMassaAddress(claimAddress)) {
+    setClaimStatus("Connect wallet first to get a valid Massa address");
+    return;
   }
 
   STATE.rewards.claimInFlight = true;
@@ -1469,9 +1847,6 @@ async function submitRewardClaim() {
 
     const needsSignature = Boolean(prepared.requiresSignature);
     if (needsSignature) {
-      if (verificationMode !== "wallet_signature") {
-        throw new Error("signature_required_wallet_mode");
-      }
       setClaimStatus("Requesting wallet signature...");
       signature = await signWithWallet(prepared.challenge);
     }
@@ -1518,6 +1893,14 @@ function onKeyDown(event) {
   const { code } = event;
   keysPressed.add(code);
   const isTypingTarget = isTextInputElement(event.target);
+  const isWalletModalOpen = Boolean(walletModal && !walletModal.hidden);
+
+  if (isWalletModalOpen) {
+    if (code === "Escape") {
+      closeWalletModal();
+    }
+    return;
+  }
 
   if (code === "Enter" || code === "Space") {
     if (STATE.mode === "title" || STATE.mode === "gameover" || STATE.mode === "won") {
@@ -1558,22 +1941,23 @@ function setupEvents() {
       submitRewardClaim().catch(() => {});
     });
   }
-  if (claimModeSelect) {
-    claimModeSelect.addEventListener("change", () => {
-      updateClaimModeUI();
+  if (topWalletButton) {
+    topWalletButton.addEventListener("click", () => {
+      openWalletModal().catch(() => {
+        setClaimStatus("Failed to open wallet selector");
+      });
     });
   }
-  if (walletConnectButton) {
-    walletConnectButton.addEventListener("click", () => {
-      setClaimStatus("Connecting wallet...");
-      connectWalletAddress()
-        .then(() => {
-          setClaimStatus("Wallet connected. You can claim now");
-        })
-        .catch((error) => {
-          const message = error instanceof Error ? error.message : "wallet_connect_failed";
-          setClaimStatus(`Wallet connection failed: ${message}`);
-        });
+  if (walletModalClose) {
+    walletModalClose.addEventListener("click", () => {
+      closeWalletModal();
+    });
+  }
+  if (walletModal) {
+    walletModal.addEventListener("click", (event) => {
+      if (event.target === walletModal) {
+        closeWalletModal();
+      }
     });
   }
   if (devWinButton) {
@@ -1611,9 +1995,9 @@ function init() {
   if (rewardPanel) {
     rewardPanel.hidden = true;
   }
+  updateTopWalletButton();
+  updateWalletStatusForClaimPanel();
   setClaimControlsDisabled(false);
-  updateClaimModeUI();
-  setWalletStatus("Wallet not connected");
   if (STATE.rewards.apiBase) {
     setClaimStatus(`Rewards API: ${STATE.rewards.apiBase}`);
   } else {
