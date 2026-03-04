@@ -96,6 +96,8 @@ const STATE = {
   rewards: {
     apiBase: "",
     promoTweetUrl: "",
+    promoOverrideLocked: false,
+    promoConfigFetchTried: false,
     sessionId: null,
     claimInFlight: false,
     claimStatusText: "",
@@ -419,6 +421,21 @@ async function syncPromoTweetFromBackend() {
   }
 }
 
+function maybeSyncPromoTweetFromBackend() {
+  if (!STATE.rewards.apiBase) {
+    return;
+  }
+  if (STATE.rewards.promoOverrideLocked) {
+    return;
+  }
+  if (STATE.rewards.promoConfigFetchTried) {
+    return;
+  }
+
+  STATE.rewards.promoConfigFetchTried = true;
+  syncPromoTweetFromBackend().catch(() => {});
+}
+
 async function ensureRewardsSession() {
   if (STATE.rewards.sessionId) {
     return STATE.rewards.sessionId;
@@ -598,6 +615,10 @@ function showOverlay(text, buttonLabel) {
     if (showRewards && rewardSummary) {
       rewardSummary.textContent = `Round reward: ${STATE.score.toLocaleString("en-US")} FPOM`;
     }
+  }
+
+  if (showRewards) {
+    maybeSyncPromoTweetFromBackend();
   }
 }
 
@@ -1432,6 +1453,8 @@ function setupEvents() {
 function init() {
   STATE.rewards.apiBase = getRewardsApiBase();
   const promoTweetOverride = getPromoTweetOverrideUrl();
+  STATE.rewards.promoOverrideLocked = Boolean(promoTweetOverride);
+  STATE.rewards.promoConfigFetchTried = false;
   applyPromoTweetUrl(promoTweetOverride || DEFAULT_X_PROMO_TWEET);
   initMaze();
   resetEntities();
@@ -1447,9 +1470,6 @@ function init() {
   setWalletStatus("Wallet not connected");
   if (STATE.rewards.apiBase) {
     setClaimStatus(`Rewards API: ${STATE.rewards.apiBase}`);
-    if (!promoTweetOverride) {
-      syncPromoTweetFromBackend().catch(() => {});
-    }
   } else {
     setClaimStatus("Rewards API is not configured");
   }

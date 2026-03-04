@@ -110,7 +110,7 @@ body {
 }
 
 .reward-panel {
-  width: min(520px, 92vw);
+  width: min(700px, 94vw);
   display: grid;
   gap: 8px;
   padding: 14px;
@@ -241,6 +241,11 @@ body {
 @media (max-width: 720px) {
   body {
     padding: 10px;
+  }
+
+  .reward-panel {
+    width: min(640px, 96vw);
+    padding: 12px;
   }
 
   .hint {
