@@ -48,8 +48,8 @@ const MAZE_OFFSET_X = Math.floor((BASE_WIDTH - MAZE_WIDTH) / 2);
 const MAZE_OFFSET_Y = Math.floor((BASE_HEIGHT - MAZE_HEIGHT) / 2);
 
 /**
- * Central mutable runtime state of the game session.
- * Kept in one object to simplify serialization and UI debug snapshots.
+ * Central mutable runtime state of the game session
+ * Kept in one object to simplify serialization and UI debug snapshots
  */
 const STATE = {
   mode: "title",
@@ -113,9 +113,9 @@ let accumulator = 0;
 // ------------------------------------------------------------
 
 /**
- * Loads image asset relative to current module URL.
+ * Loads image asset relative to current module URL
  *
- * @param {string} src - Relative asset path.
+ * @param {string} src Relative asset path
  * @returns {HTMLImageElement}
  */
 function loadImage(src) {
@@ -125,6 +125,9 @@ function loadImage(src) {
   return img;
 }
 
+/**
+ * Resolves rewards API base URL from runtime config
+ */
 function getRewardsApiBase() {
   if (window.__FPOM_REWARDS_API__) {
     return String(window.__FPOM_REWARDS_API__).replace(/\/+$/, "");
@@ -142,6 +145,9 @@ function getRewardsApiBase() {
   return "";
 }
 
+/**
+ * Resolves promo tweet override URL from runtime config
+ */
 function getPromoTweetOverrideUrl() {
   if (window.__FPOM_X_PROMO_TWEET__) {
     return String(window.__FPOM_X_PROMO_TWEET__).trim();
@@ -156,9 +162,9 @@ function getPromoTweetOverrideUrl() {
 }
 
 /**
- * Applies promo tweet URL to local state and reward panel link.
+ * Applies promo tweet URL to local state and reward panel link
  *
- * @param {string} url - Candidate URL from config/query/backend.
+ * @param {string} url Candidate URL from config/query/backend
  */
 function applyPromoTweetUrl(url) {
   const normalized = (url || "").trim() || DEFAULT_X_PROMO_TWEET;
@@ -170,6 +176,9 @@ function applyPromoTweetUrl(url) {
   }
 }
 
+/**
+ * Checks whether local debug tools are enabled
+ */
 function isDebugToolsEnabled() {
   const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
   const isDevParamEnabled = new URLSearchParams(window.location.search).get("dev") === "1";
@@ -180,6 +189,9 @@ function isDebugToolsEnabled() {
 // Rewards panel + wallet connection UI
 // ------------------------------------------------------------
 
+/**
+ * Updates claim status text in state and UI
+ */
 function setClaimStatus(text) {
   STATE.rewards.claimStatusText = text;
   if (claimStatus) {
@@ -187,6 +199,9 @@ function setClaimStatus(text) {
   }
 }
 
+/**
+ * Enables or disables reward claim controls
+ */
 function setClaimControlsDisabled(disabled) {
   if (claimButton) {
     claimButton.disabled = disabled;
@@ -196,12 +211,18 @@ function setClaimControlsDisabled(disabled) {
   }
 }
 
+/**
+ * Updates wallet status text in reward panel
+ */
 function setWalletStatus(text) {
   if (walletStatus) {
     walletStatus.textContent = text;
   }
 }
 
+/**
+ * Refreshes wallet status line based on connection state
+ */
 function updateWalletStatusForClaimPanel() {
   const connectedAddress = STATE.rewards.connectedAddress || "";
   if (isValidMassaAddress(connectedAddress)) {
@@ -212,6 +233,9 @@ function updateWalletStatusForClaimPanel() {
   setWalletStatus("Use the Connect Wallet button in the top-right corner");
 }
 
+/**
+ * Refreshes top wallet button label and state
+ */
 function updateTopWalletButton() {
   if (!topWalletButton) {
     return;
@@ -233,12 +257,18 @@ function updateTopWalletButton() {
   topWalletButton.textContent = `${STATE.rewards.walletProviderName || "Wallet"}: ${shortAddress}`;
 }
 
+/**
+ * Loads and stores current wallet candidates
+ */
 async function refreshWalletProviders() {
   const candidates = await discoverWalletCandidates();
   STATE.rewards.walletProviders = candidates;
   return candidates;
 }
 
+/**
+ * Stores connected wallet identity and refreshes wallet UI
+ */
 function applyConnectedWallet(candidate, address, walletAccount = null) {
   STATE.rewards.connectedAddress = address.trim();
   STATE.rewards.walletProvider = candidate.wallet || candidate.provider || null;
@@ -249,6 +279,9 @@ function applyConnectedWallet(candidate, address, walletAccount = null) {
   closeWalletModal();
 }
 
+/**
+ * Toggles pending state for wallet modal actions
+ */
 function setWalletModalPending(pending) {
   STATE.rewards.walletModalInFlight = pending;
   if (topWalletButton) {
@@ -265,6 +298,9 @@ function setWalletModalPending(pending) {
   }
 }
 
+/**
+ * Sets wallet modal subtitle text visibility and content
+ */
 function setWalletModalSubtitle(text) {
   if (!walletModalSubtitle) {
     return;
@@ -275,10 +311,10 @@ function setWalletModalSubtitle(text) {
 }
 
 /**
- * Renders account picker UI for multi-account Massa Wallet case.
+ * Renders account picker UI for multi-account wallet case
  *
- * @param {any} candidate - Selected wallet candidate metadata.
- * @param {Array<{address: string; account: any}>} accountOptions - Available wallet accounts.
+ * @param {any} candidate Selected wallet candidate metadata
+ * @param {Array<{address: string; account: any}>} accountOptions Available wallet accounts
  */
 function renderWalletAccountPicker(candidate, accountOptions) {
   if (!walletOptions) {
@@ -330,6 +366,9 @@ function renderWalletAccountPicker(candidate, accountOptions) {
   setClaimStatus("Choose account and confirm");
 }
 
+/**
+ * Closes wallet selection modal
+ */
 function closeWalletModal() {
   if (walletModal) {
     walletModal.hidden = true;
@@ -337,7 +376,7 @@ function closeWalletModal() {
 }
 
 /**
- * Opens wallet modal and renders detected providers.
+ * Opens wallet modal and renders detected providers
  */
 async function openWalletModal() {
   if (!walletModal || !walletOptions) {
@@ -401,9 +440,9 @@ async function openWalletModal() {
 }
 
 /**
- * Connects wallet provider and stores selected account in STATE.
+ * Connects wallet provider and stores selected account in STATE
  *
- * @param {string} [preferredWalletId] - Candidate id selected in modal.
+ * @param {string} [preferredWalletId] Candidate id selected in modal
  * @returns {Promise<{status: \"connected\" | \"select_account\"; address?: string}>}
  */
 async function connectWalletAddress(preferredWalletId = "") {
@@ -453,9 +492,9 @@ async function connectWalletAddress(preferredWalletId = "") {
 }
 
 /**
- * Signs backend challenge using connected wallet account/provider.
+ * Signs backend challenge using connected wallet account/provider
  *
- * @param {string} challenge - Challenge text from backend.
+ * @param {string} challenge Challenge text from backend
  * @returns {Promise<string>}
  */
 async function signWithWallet(challenge) {
@@ -468,7 +507,7 @@ async function signWithWallet(challenge) {
 }
 
 /**
- * Rewards backend POST helper bound to configured API base URL.
+ * Rewards backend POST helper bound to configured API base URL
  */
 async function apiPost(path, body) {
   const base = STATE.rewards.apiBase;
@@ -480,7 +519,7 @@ async function apiPost(path, body) {
 }
 
 /**
- * Rewards backend GET helper bound to configured API base URL.
+ * Rewards backend GET helper bound to configured API base URL
  */
 async function apiGet(path) {
   const base = STATE.rewards.apiBase;
@@ -491,6 +530,9 @@ async function apiGet(path) {
   return apiGetJson(base, path, REWARDS_API_TIMEOUT_MS);
 }
 
+/**
+ * Fetches promo tweet URL from backend config
+ */
 async function syncPromoTweetFromBackend() {
   if (!STATE.rewards.apiBase) {
     return;
@@ -507,6 +549,9 @@ async function syncPromoTweetFromBackend() {
   }
 }
 
+/**
+ * Runs promo tweet sync once when allowed
+ */
 function maybeSyncPromoTweetFromBackend() {
   if (!STATE.rewards.apiBase) {
     return;
@@ -526,6 +571,9 @@ function maybeSyncPromoTweetFromBackend() {
 // Session telemetry helpers (anti-abuse signals for backend)
 // ------------------------------------------------------------
 
+/**
+ * Returns elapsed run time in milliseconds
+ */
 function getRunElapsedMs() {
   if (!STATE.runStats.startedAtMs) {
     return 0;
@@ -534,10 +582,10 @@ function getRunElapsedMs() {
 }
 
 /**
- * Queues gameplay telemetry event for batched backend upload.
+ * Queues gameplay telemetry event for batched backend upload
  *
- * @param {string} type - Event name.
- * @param {Record<string, unknown>} payload - Event payload.
+ * @param {string} type Event name
+ * @param {Record<string, unknown>} payload Event payload
  */
 function queueSessionEvent(type, payload = {}) {
   if (!STATE.rewards.apiBase) {
@@ -558,9 +606,9 @@ function queueSessionEvent(type, payload = {}) {
 }
 
 /**
- * Flushes buffered telemetry events to backend in batches.
+ * Flushes buffered telemetry events to backend in batches
  *
- * @param {boolean} [force=false] - When true, flushes all pending events.
+ * @param {boolean} [force=false] When true, flushes all pending events
  */
 async function flushSessionEvents(force = false) {
   if (!STATE.rewards.apiBase) {
@@ -599,9 +647,9 @@ async function flushSessionEvents(force = false) {
 }
 
 /**
- * Ensures rewards session exists and is synced with backend.
+ * Ensures rewards session exists and is synced with backend
  *
- * @param {boolean} [force=false] - Skip retry cooldown.
+ * @param {boolean} [force=false] Skip retry cooldown
  * @returns {Promise<string | null>}
  */
 async function ensureRewardsSession(force = false) {
@@ -629,7 +677,7 @@ async function ensureRewardsSession(force = false) {
 }
 
 /**
- * Builds compact run summary used for claim verification.
+ * Builds compact run summary used for claim verification
  *
  * @returns {{durationMs: number; finalScoreClient: number; pelletsEaten: number; powerPelletsEaten: number; enemiesEaten: number; won: boolean}}
  */
@@ -647,6 +695,9 @@ function getRunSummary() {
   };
 }
 
+/**
+ * Forces win state for local debug flow
+ */
 function triggerDebugVictory() {
   if (!isDebugToolsEnabled()) {
     return;
@@ -679,6 +730,9 @@ function triggerDebugVictory() {
 // World initialization and entity factories
 // ------------------------------------------------------------
 
+/**
+ * Builds maze pellets and remaining pellet counter from template
+ */
 function initMaze() {
   STATE.pellets = [];
   STATE.pelletsLeft = 0;
@@ -700,6 +754,9 @@ function initMaze() {
   }
 }
 
+/**
+ * Returns pixel center for a given tile coordinate
+ */
 function tileCenter(col, row) {
   return {
     x: MAZE_OFFSET_X + col * TILE + TILE / 2,
@@ -707,6 +764,9 @@ function tileCenter(col, row) {
   };
 }
 
+/**
+ * Creates initial player entity
+ */
 function createPlayer() {
   const spawn = tileCenter(14, 13);
   return {
@@ -721,6 +781,9 @@ function createPlayer() {
   };
 }
 
+/**
+ * Creates enemy entity by type and spawn index
+ */
 function createEnemy(type, idx) {
   const spawnPoints = [
     { col: 13, row: 8, dir: "left" },
@@ -745,6 +808,9 @@ function createEnemy(type, idx) {
   };
 }
 
+/**
+ * Resets player and enemy entities to spawn state
+ */
 function resetEntities() {
   STATE.player = createPlayer();
   STATE.enemies = ENEMY_TYPES.map((type, i) => createEnemy(type, i));
@@ -753,6 +819,9 @@ function resetEntities() {
   STATE.roundResetTimer = 0;
 }
 
+/**
+ * Starts a fresh run and resets score and runtime flags
+ */
 function startNewGame() {
   STATE.mode = "playing";
   STATE.score = 0;
@@ -789,14 +858,23 @@ function startNewGame() {
   playTone(460, 0.09, "triangle", 0.04);
 }
 
+/**
+ * Resets entities after losing a life while keeping score
+ */
 function resetRound() {
   resetEntities();
 }
 
+/**
+ * Hides menu overlay element
+ */
 function hideOverlay() {
   menuOverlay.style.display = "none";
 }
 
+/**
+ * Shows menu overlay and updates title and button text
+ */
 function showOverlay(text, buttonLabel) {
   menuOverlay.style.display = "grid";
   const title = menuOverlay.querySelector("h1");
@@ -830,6 +908,9 @@ function showOverlay(text, buttonLabel) {
 // Audio helpers
 // ------------------------------------------------------------
 
+/**
+ * Initializes shared audio context lazily
+ */
 function ensureAudioContext() {
   if (audioCtx) {
     return;
@@ -842,7 +923,7 @@ function ensureAudioContext() {
 }
 
 /**
- * Plays short procedural retro tone.
+ * Plays short procedural retro tone
  */
 function playTone(freq, duration = 0.08, type = "square", volume = 0.05) {
   if (!audioCtx || audioCtx.state === "suspended") {
@@ -865,6 +946,9 @@ function playTone(freq, duration = 0.08, type = "square", volume = 0.05) {
 // Movement, collision and gameplay update loop
 // ------------------------------------------------------------
 
+/**
+ * Converts world pixel coordinate to maze tile coordinate
+ */
 function worldToTile(x, y) {
   return {
     col: Math.floor((x - MAZE_OFFSET_X) / TILE),
@@ -872,6 +956,9 @@ function worldToTile(x, y) {
   };
 }
 
+/**
+ * Checks whether tile coordinate is blocked by wall
+ */
 function tileIsWall(col, row) {
   if (col < 0 || row < 0 || col >= MAZE_COLS || row >= MAZE_ROWS) {
     return true;
@@ -879,6 +966,9 @@ function tileIsWall(col, row) {
   return STATE.maze[row][col] === "#";
 }
 
+/**
+ * Checks whether entity is close to tile center point
+ */
 function isNearCenter(entity, tolerance = 2.1) {
   const tile = worldToTile(entity.x, entity.y);
   const center = tileCenter(tile.col, tile.row);
@@ -888,6 +978,9 @@ function isNearCenter(entity, tolerance = 2.1) {
   );
 }
 
+/**
+ * Checks whether entity can move in direction without hitting walls
+ */
 function canMove(entity, dir) {
   const vec = DIRS[dir];
   const step = 4;
@@ -905,6 +998,9 @@ function canMove(entity, dir) {
   return checks.every((tile) => !tileIsWall(tile.col, tile.row));
 }
 
+/**
+ * Snaps entity position to nearest tile center
+ */
 function snapToGrid(entity) {
   const tile = worldToTile(entity.x, entity.y);
   const center = tileCenter(tile.col, tile.row);
@@ -912,6 +1008,9 @@ function snapToGrid(entity) {
   entity.y = center.y;
 }
 
+/**
+ * Tries to switch player to desired direction
+ */
 function tryApplyDesiredDirection(forceSnap = false) {
   const player = STATE.player;
   if (!forceSnap && player.desiredDir === player.dir) {
@@ -929,7 +1028,7 @@ function tryApplyDesiredDirection(forceSnap = false) {
 }
 
 /**
- * Updates player movement and desired direction application.
+ * Updates player movement and desired direction application
  */
 function updatePlayer(dt) {
   const player = STATE.player;
@@ -952,6 +1051,9 @@ function updatePlayer(dt) {
   player.mouthPhase += dt * 12;
 }
 
+/**
+ * Returns opposite direction key
+ */
 function oppositeDirection(dir) {
   if (dir === "left") return "right";
   if (dir === "right") return "left";
@@ -959,6 +1061,9 @@ function oppositeDirection(dir) {
   return "up";
 }
 
+/**
+ * Updates enemy AI movement and direction changes
+ */
 function updateEnemy(enemy, dt) {
   if (enemy.respawnTimer > 0) {
     enemy.respawnTimer -= dt;
@@ -1012,6 +1117,9 @@ function updateEnemy(enemy, dt) {
   enemy.blink += dt;
 }
 
+/**
+ * Spawns sprite shard particles for hit effects
+ */
 function spawnShatterEffect(x, y, radius, spriteKey, amount = 18) {
   const image = images[spriteKey];
   const imgW = image?.naturalWidth || 64;
@@ -1042,6 +1150,9 @@ function spawnShatterEffect(x, y, radius, spriteKey, amount = 18) {
   }
 }
 
+/**
+ * Advances and prunes active shard effects
+ */
 function updateEffects(dt) {
   for (const e of STATE.effects) {
     e.life -= dt;
@@ -1053,6 +1164,9 @@ function updateEffects(dt) {
   STATE.effects = STATE.effects.filter((e) => e.life > 0);
 }
 
+/**
+ * Handles pellet and power pellet pickup logic
+ */
 function eatPellets() {
   const player = STATE.player;
   let pelletsEatenThisTick = 0;
@@ -1112,6 +1226,9 @@ function eatPellets() {
   }
 }
 
+/**
+ * Handles collisions between player and enemies
+ */
 function handleEnemyCollisions() {
   const player = STATE.player;
   if (!player.alive) return;
@@ -1160,9 +1277,9 @@ function handleEnemyCollisions() {
 }
 
 /**
- * Fixed-step gameplay update.
+ * Fixed-step gameplay update
  *
- * @param {number} dt - Delta time in seconds.
+ * @param {number} dt Delta time in seconds
  */
 function update(dt) {
   if (STATE.mode !== "playing" || STATE.paused) {
@@ -1198,6 +1315,9 @@ function update(dt) {
 // Rendering and frame stepping
 // ------------------------------------------------------------
 
+/**
+ * Renders current frame on game canvas
+ */
 function render() {
   renderScene({
     ctx,
@@ -1216,7 +1336,7 @@ function render() {
 }
 
 /**
- * RAF loop with fixed timestep accumulator.
+ * RAF loop with fixed timestep accumulator
  */
 function gameLoop(ts) {
   if (!lastTs) {
@@ -1237,9 +1357,9 @@ function gameLoop(ts) {
 }
 
 /**
- * Deterministic stepping hook used by Playwright automation.
+ * Deterministic stepping hook used by Playwright automation
  *
- * @param {number} ms - Virtual milliseconds to advance.
+ * @param {number} ms Virtual milliseconds to advance
  */
 function advanceTime(ms) {
   const steps = Math.max(1, Math.round(ms / (FIXED_DT * 1000)));
@@ -1250,7 +1370,7 @@ function advanceTime(ms) {
 }
 
 /**
- * Debug/state serialization used by automated testing tools.
+ * Debug/state serialization used by automated testing tools
  *
  * @returns {string}
  */
@@ -1298,6 +1418,9 @@ function renderGameToText() {
 // Input / claim actions
 // ------------------------------------------------------------
 
+/**
+ * Applies directional input to player desired direction
+ */
 function handleDirectionInput(dir) {
   if (!STATE.player) return;
   if (STATE.player.desiredDir !== dir) {
@@ -1308,6 +1431,9 @@ function handleDirectionInput(dir) {
   STATE.player.desiredDir = dir;
 }
 
+/**
+ * Toggles pause mode during active run
+ */
 function togglePause() {
   if (STATE.mode !== "playing") return;
   STATE.paused = !STATE.paused;
@@ -1316,6 +1442,9 @@ function togglePause() {
   });
 }
 
+/**
+ * Toggles browser fullscreen mode
+ */
 async function toggleFullscreen() {
   if (!document.fullscreenElement) {
     await document.documentElement.requestFullscreen();
@@ -1324,11 +1453,17 @@ async function toggleFullscreen() {
   }
 }
 
+/**
+ * Reads reward claim form values from UI
+ */
 function readClaimForm() {
   const xProfile = xProfileInput ? xProfileInput.value.trim() : "";
   return { xProfile };
 }
 
+/**
+ * Submits reward claim prepare and confirm flow
+ */
 async function submitRewardClaim() {
   if (STATE.mode !== "won" || STATE.rewards.claimInFlight) {
     return;
@@ -1416,6 +1551,9 @@ async function submitRewardClaim() {
   }
 }
 
+/**
+ * Checks whether target element is text-editable
+ */
 function isTextInputElement(element) {
   if (!element) {
     return false;
@@ -1427,6 +1565,9 @@ function isTextInputElement(element) {
   return Boolean(element.isContentEditable);
 }
 
+/**
+ * Handles keyboard keydown events for gameplay and UI
+ */
 function onKeyDown(event) {
   const { code } = event;
   keysPressed.add(code);
@@ -1466,10 +1607,16 @@ function onKeyDown(event) {
   if (code === "ArrowDown" || code === "KeyS") handleDirectionInput("down");
 }
 
+/**
+ * Handles keyboard keyup events
+ */
 function onKeyUp(event) {
   keysPressed.delete(event.code);
 }
 
+/**
+ * Registers DOM and input event listeners
+ */
 function setupEvents() {
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
@@ -1519,7 +1666,7 @@ function setupEvents() {
 }
 
 /**
- * App entry point.
+ * App entry point
  */
 function init() {
   STATE.rewards.apiBase = getRewardsApiBase();

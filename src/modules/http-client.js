@@ -1,11 +1,11 @@
 /**
- * Executes JSON POST request against rewards backend.
+ * Executes JSON POST request against rewards backend
  *
- * @param {string} baseUrl - API base URL without trailing slash.
- * @param {string} path - Endpoint path starting with '/'.
- * @param {unknown} body - JSON-serializable payload.
- * @param {number} timeoutMs - Request timeout in milliseconds.
- * @returns {Promise<any>} Parsed JSON payload.
+ * @param {string} baseUrl API base URL without trailing slash
+ * @param {string} path Endpoint path starting with '/'
+ * @param {unknown} body JSON-serializable payload
+ * @param {number} timeoutMs Request timeout in milliseconds
+ * @returns {Promise<any>} Parsed JSON payload
  */
 export async function apiPostJson(baseUrl, path, body, timeoutMs) {
   return requestJson(baseUrl, path, {
@@ -16,25 +16,25 @@ export async function apiPostJson(baseUrl, path, body, timeoutMs) {
 }
 
 /**
- * Executes JSON GET request against rewards backend.
+ * Executes JSON GET request against rewards backend
  *
- * @param {string} baseUrl - API base URL without trailing slash.
- * @param {string} path - Endpoint path starting with '/'.
- * @param {number} timeoutMs - Request timeout in milliseconds.
- * @returns {Promise<any>} Parsed JSON payload.
+ * @param {string} baseUrl API base URL without trailing slash
+ * @param {string} path Endpoint path starting with '/'
+ * @param {number} timeoutMs Request timeout in milliseconds
+ * @returns {Promise<any>} Parsed JSON payload
  */
 export async function apiGetJson(baseUrl, path, timeoutMs) {
   return requestJson(baseUrl, path, { method: "GET" }, timeoutMs);
 }
 
 /**
- * Shared fetch helper that applies timeout and unified backend error handling.
+ * Shared fetch helper that applies timeout and unified backend error handling
  *
- * @param {string} baseUrl - API base URL without trailing slash.
- * @param {string} path - Endpoint path starting with '/'.
- * @param {RequestInit} init - Fetch init object.
- * @param {number} timeoutMs - Request timeout in milliseconds.
- * @returns {Promise<any>} Parsed JSON payload.
+ * @param {string} baseUrl API base URL without trailing slash
+ * @param {string} path Endpoint path starting with '/'
+ * @param {RequestInit} init Fetch init object
+ * @param {number} timeoutMs Request timeout in milliseconds
+ * @returns {Promise<any>} Parsed JSON payload
  */
 async function requestJson(baseUrl, path, init, timeoutMs) {
   const controller = new AbortController();

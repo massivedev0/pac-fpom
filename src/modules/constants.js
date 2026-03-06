@@ -1,24 +1,24 @@
 /**
- * Core game viewport dimensions.
+ * Core game viewport dimensions
  * @readonly
  */
 export const BASE_WIDTH = 960;
 export const BASE_HEIGHT = 640;
 
 /**
- * Fixed maze tile size in pixels.
+ * Fixed maze tile size in pixels
  * @readonly
  */
 export const TILE = 32;
 
 /**
- * Deterministic fixed-step update delta (seconds).
+ * Deterministic fixed-step update delta (seconds)
  * @readonly
  */
 export const FIXED_DT = 1 / 60;
 
 /**
- * Reward/claim client defaults.
+ * Reward/claim client defaults
  * @readonly
  */
 export const REWARDS_API_TIMEOUT_MS = 11_000;
@@ -30,14 +30,14 @@ export const SESSION_EVENTS_BUFFER_LIMIT = 1200;
 export const SESSION_RETRY_DELAY_MS = 2500;
 
 /**
- * Wallet/claim flow defaults.
+ * Wallet/claim flow defaults
  * @readonly
  */
 export const WALLET_CONNECT_TIMEOUT_MS = 9000;
 export const CLAIM_VERIFICATION_MODE = "wallet_signature";
 
 /**
- * Score values tuned for roughly 100k points per full clear run.
+ * Score values tuned for roughly 100k points per full clear run
  * @readonly
  */
 export const SCORE_VALUES = Object.freeze({
@@ -49,7 +49,7 @@ export const SCORE_VALUES = Object.freeze({
 });
 
 /**
- * Direction vectors in tile-space.
+ * Direction vectors in tile-space
  * @readonly
  */
 export const DIRS = Object.freeze({
@@ -86,7 +86,7 @@ export const MAZE_TEMPLATE = Object.freeze([
 ]);
 
 /**
- * Enemy spawn sequence.
+ * Enemy spawn sequence
  * @readonly
  */
 export const ENEMY_TYPES = Object.freeze(["doge", "shiba", "pepe", "doge", "shiba", "pepe"]);

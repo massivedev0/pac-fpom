@@ -1,10 +1,10 @@
 const INSTALL_ID_STORAGE_KEY = "fpom_install_id";
 
 /**
- * Validates FPOM claim X profile URL format.
+ * Validates FPOM claim X profile URL format
  *
- * @param {string} input - Raw user input.
- * @returns {string | null} Normalized profile URL or `null` if invalid.
+ * @param {string} input Raw user input
+ * @returns {string | null} Normalized profile URL or `null` if invalid
  */
 export function normalizeXProfile(input) {
   const trimmed = input.trim();
@@ -16,19 +16,19 @@ export function normalizeXProfile(input) {
 }
 
 /**
- * Checks that address is a valid Massa address string.
+ * Checks that address is a valid Massa address string
  *
- * @param {string} input - Candidate wallet address.
- * @returns {boolean} True when input looks like AU... or AS... Massa address.
+ * @param {string} input Candidate wallet address
+ * @returns {boolean} True when input looks like AU... or AS... Massa address
  */
 export function isValidMassaAddress(input) {
   return /^A[US][1-9A-HJ-NP-Za-km-z]{20,120}$/.test(input.trim());
 }
 
 /**
- * Builds a simple client fingerprint used for risk checks on backend.
+ * Builds a simple client fingerprint used for risk checks on backend
  *
- * @returns {string} JSON payload with stable install id + browser hints.
+ * @returns {string} JSON payload with stable install id + browser hints
  */
 export function getFingerprint() {
   const payload = {
@@ -42,9 +42,9 @@ export function getFingerprint() {
 }
 
 /**
- * Persists a stable pseudo-install identifier in local storage.
+ * Persists a stable pseudo-install identifier in local storage
  *
- * @returns {string} Existing or newly generated install id.
+ * @returns {string} Existing or newly generated install id
  */
 function getInstallId() {
   const existing = window.localStorage.getItem(INSTALL_ID_STORAGE_KEY);

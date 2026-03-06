@@ -12,9 +12,9 @@ let walletProviderModulePromise = null;
  */
 
 /**
- * Discovers available wallet providers (Massa Station, Massa Wallet, Bearby, MetaMask-Snap if available).
+ * Discovers available wallet providers (Massa Station, Massa Wallet, Bearby, MetaMask-Snap if available)
  *
- * @returns {Promise<WalletCandidate[]>} Deduplicated candidate list.
+ * @returns {Promise<WalletCandidate[]>} Deduplicated candidate list
  */
 export async function discoverWalletCandidates() {
   const candidates = [];
@@ -53,11 +53,11 @@ export async function discoverWalletCandidates() {
 }
 
 /**
- * Resolves claimable wallet accounts for a selected candidate.
+ * Resolves claimable wallet accounts for a selected candidate
  *
- * @param {WalletCandidate} candidate - Selected wallet candidate.
- * @param {{ timeoutMs: number; isValidAddress: (address: string) => boolean }} options - Validation/timeouts.
- * @returns {Promise<Array<{ address: string; account: any }>>} Valid account entries.
+ * @param {WalletCandidate} candidate Selected wallet candidate
+ * @param {{ timeoutMs: number; isValidAddress: (address: string) => boolean }} options Validation and timeout settings
+ * @returns {Promise<Array<{ address: string; account: any }>>} Valid account entries
  */
 export async function getCandidateAccounts(candidate, options) {
   const timeoutMs = Number(options?.timeoutMs || 0) || 9000;
@@ -85,15 +85,15 @@ export async function getCandidateAccounts(candidate, options) {
 }
 
 /**
- * Signs claim challenge using connected account/provider.
+ * Signs claim challenge using connected account or provider
  *
  * @param {{
  *   walletAccount: any;
  *   walletProvider: any;
  *   connectedAddress: string;
  *   challenge: string;
- * }} params - Signing context.
- * @returns {Promise<string>} Serialized signature.
+ * }} params Signing context
+ * @returns {Promise<string>} Serialized signature
  */
 export async function signChallenge(params) {
   const walletAccount = params?.walletAccount;
@@ -141,9 +141,9 @@ export async function signChallenge(params) {
 }
 
 /**
- * Creates or reuses wallet-provider ESM module promise.
+ * Creates or reuses wallet-provider ESM module promise
  *
- * @returns {Promise<any>} Loaded module object.
+ * @returns {Promise<any>} Loaded module object
  */
 async function loadWalletProviderModule() {
   if (walletProviderModulePromise) {
@@ -159,9 +159,9 @@ async function loadWalletProviderModule() {
 }
 
 /**
- * Discovers legacy injected wallet globals as fallback.
+ * Discovers legacy injected wallet globals as fallback
  *
- * @returns {WalletCandidate[]} Legacy candidates.
+ * @returns {WalletCandidate[]} Legacy candidates
  */
 function detectLegacyWalletProviders() {
   const candidates = [];
@@ -201,10 +201,11 @@ function detectLegacyWalletProviders() {
 }
 
 /**
- * Tries known method names to request address from legacy injected provider.
+ * Tries known method names to request address list from legacy injected provider
  *
- * @param {any} provider - Legacy provider object.
- * @returns {Promise<string>} Extracted address or empty string.
+ * @param {any} provider Legacy provider object
+ * @param {(address: string) => boolean} isValidAddress Address validator callback
+ * @returns {Promise<Array<{ address: string; account: null }>>} Valid and deduplicated legacy accounts
  */
 async function requestLegacyProviderAccounts(provider, isValidAddress) {
   const attempts = [
@@ -245,11 +246,11 @@ async function requestLegacyProviderAccounts(provider, isValidAddress) {
 }
 
 /**
- * Requests all connected accounts via wallet-provider SDK wallet object.
+ * Requests all connected accounts via wallet-provider SDK wallet object
  *
- * @param {any} wallet - Wallet-provider SDK wallet object.
- * @param {(address: string) => boolean} isValidAddress - Address validation callback.
- * @returns {Promise<Array<{ address: string; account: any }>>} Valid and deduplicated accounts.
+ * @param {any} wallet Wallet-provider SDK wallet object
+ * @param {(address: string) => boolean} isValidAddress Address validation callback
+ * @returns {Promise<Array<{ address: string; account: any }>>} Valid and deduplicated accounts
  */
 async function requestWalletProviderAccounts(wallet, isValidAddress) {
   if (!wallet) {
@@ -292,11 +293,11 @@ async function requestWalletProviderAccounts(wallet, isValidAddress) {
 }
 
 /**
- * Maps SDK wallet name to readable UI label.
+ * Maps SDK wallet name to readable UI label
  *
- * @param {string} rawName - Wallet name from SDK.
- * @param {any} wallet - Wallet instance (used to detect Massa Station class).
- * @returns {string} UI label.
+ * @param {string} rawName Wallet name from SDK
+ * @param {any} wallet Wallet instance (used to detect Massa Station class)
+ * @returns {string} UI label
  */
 function walletNameToLabel(rawName, wallet) {
   const ctorName = String(wallet?.constructor?.name || "").toLowerCase();
@@ -330,10 +331,10 @@ function walletNameToLabel(rawName, wallet) {
 }
 
 /**
- * Builds safe id fragment from wallet name.
+ * Builds safe id fragment from wallet name
  *
- * @param {string} rawName - Raw wallet name.
- * @returns {string} Safe lowercase id.
+ * @param {string} rawName Raw wallet name
+ * @returns {string} Safe lowercase id
  */
 function walletNameToId(rawName) {
   const normalized = String(rawName || "wallet")
@@ -345,10 +346,10 @@ function walletNameToId(rawName) {
 }
 
 /**
- * Normalizes address from different provider result shapes.
+ * Normalizes address from different provider result shapes
  *
- * @param {any} value - Provider response payload.
- * @returns {string} Extracted address or empty string.
+ * @param {any} value Provider response payload
+ * @returns {string} Extracted address or empty string
  */
 function normalizeAddressResult(value) {
   if (!value) return "";
@@ -376,10 +377,10 @@ function normalizeAddressResult(value) {
 }
 
 /**
- * Extracts a flat list of address-like strings from provider responses.
+ * Extracts a flat list of address-like strings from provider responses
  *
- * @param {any} value - Provider response payload.
- * @returns {string[]} Extracted address candidates.
+ * @param {any} value Provider response payload
+ * @returns {string[]} Extracted address candidates
  */
 function normalizeAddressList(value) {
   if (!value) {
@@ -412,10 +413,10 @@ function normalizeAddressList(value) {
 }
 
 /**
- * Converts signature results to string form accepted by backend.
+ * Converts signature results to string form accepted by backend
  *
- * @param {any} value - Signature return value from wallet/account.
- * @returns {string} Signature payload or empty string.
+ * @param {any} value Signature return value from wallet/account
+ * @returns {string} Signature payload or empty string
  */
 function normalizeSignatureResult(value) {
   if (!value) {
@@ -444,13 +445,13 @@ function normalizeSignatureResult(value) {
 }
 
 /**
- * Applies timeout to arbitrary async operation.
+ * Applies timeout to arbitrary async operation
  *
  * @template T
- * @param {Promise<T>} promise - Promise to guard.
- * @param {number} timeoutMs - Timeout in milliseconds.
- * @param {string} timeoutCode - Error code text for timeout error.
- * @returns {Promise<T>} Promise result when operation finishes in time.
+ * @param {Promise<T>} promise Promise to guard
+ * @param {number} timeoutMs Timeout in milliseconds
+ * @param {string} timeoutCode Error code text for timeout error
+ * @returns {Promise<T>} Promise result when operation finishes in time
  */
 function withTimeout(promise, timeoutMs, timeoutCode = "operation_timeout") {
   return new Promise((resolve, reject) => {

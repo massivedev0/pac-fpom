@@ -1,5 +1,5 @@
 /**
- * Renders full game frame (maze, actors, FX, HUD and mode banner).
+ * Renders full game frame (maze, actors, FX, HUD and mode banner)
  *
  * @param {{
  *   ctx: CanvasRenderingContext2D;
@@ -14,7 +14,7 @@
  *   mazeHeight: number;
  *   mazeOffsetX: number;
  *   mazeOffsetY: number;
- * }} input - Render context.
+ * }} input Render context
  */
 export function renderScene(input) {
   const {
@@ -57,6 +57,9 @@ export function renderScene(input) {
   drawModeBanner(ctx, state, baseWidth, baseHeight);
 }
 
+/**
+ * Draws maze backdrop and scanline accents
+ */
 function drawMazeBackground(ctx, mazeRows, mazeWidth, mazeHeight, mazeOffsetX, mazeOffsetY, tile) {
   const gradient = ctx.createLinearGradient(0, mazeOffsetY, 0, mazeOffsetY + mazeHeight);
   gradient.addColorStop(0, "#170f29");
@@ -74,6 +77,9 @@ function drawMazeBackground(ctx, mazeRows, mazeWidth, mazeHeight, mazeOffsetX, m
   ctx.restore();
 }
 
+/**
+ * Draws wall tiles from maze matrix
+ */
 function drawWalls(ctx, state, mazeRows, mazeCols, tile, mazeOffsetX, mazeOffsetY) {
   for (let row = 0; row < mazeRows; row += 1) {
     for (let col = 0; col < mazeCols; col += 1) {
@@ -94,6 +100,9 @@ function drawWalls(ctx, state, mazeRows, mazeCols, tile, mazeOffsetX, mazeOffset
   }
 }
 
+/**
+ * Draws regular and power pellets
+ */
 function drawPellets(ctx, state, mazeOffsetX, mazeOffsetY, tile) {
   for (const pellet of state.pellets) {
     if (pellet.eaten) continue;
@@ -108,6 +117,9 @@ function drawPellets(ctx, state, mazeOffsetX, mazeOffsetY, tile) {
   }
 }
 
+/**
+ * Applies sprite transform based on movement direction
+ */
 function applyDirectionalTransform(ctx, dir) {
   if (dir === "left") {
     ctx.scale(-1, 1);
@@ -123,6 +135,9 @@ function applyDirectionalTransform(ctx, dir) {
   }
 }
 
+/**
+ * Draws player sprite and power glow effect
+ */
 function drawPlayer(ctx, state, images) {
   const p = state.player;
   const facing = p.dir === "left" ? Math.PI : p.dir === "up" ? -Math.PI / 2 : p.dir === "down" ? Math.PI / 2 : 0;
@@ -153,6 +168,9 @@ function drawPlayer(ctx, state, images) {
   }
 }
 
+/**
+ * Draws enemy sprite and frightened aura
+ */
 function drawEnemy(ctx, state, enemy, images) {
   if (enemy.respawnTimer > 0) {
     return;
@@ -189,6 +207,9 @@ function drawEnemy(ctx, state, enemy, images) {
   ctx.restore();
 }
 
+/**
+ * Draws active sprite shard effects
+ */
 function drawEffects(ctx, state, images) {
   for (const effect of state.effects) {
     const alpha = Math.max(0, Math.min(1, effect.life / effect.maxLife));
@@ -220,6 +241,9 @@ function drawEffects(ctx, state, images) {
   }
 }
 
+/**
+ * Draws score, lives and pause overlay
+ */
 function drawHud(ctx, state, baseWidth, baseHeight) {
   ctx.fillStyle = "#fff7e0";
   ctx.font = '16px "Press Start 2P", monospace';
@@ -240,6 +264,9 @@ function drawHud(ctx, state, baseWidth, baseHeight) {
   }
 }
 
+/**
+ * Draws title, game over or win banner
+ */
 function drawModeBanner(ctx, state, baseWidth, baseHeight) {
   if (state.mode === "playing") {
     return;
