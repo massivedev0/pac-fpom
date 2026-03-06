@@ -1,3 +1,27 @@
+import {
+  BASE_HEIGHT,
+  BASE_WIDTH,
+  CLAIM_VERIFICATION_MODE,
+  DEFAULT_DEBUG_WIN_SCORE,
+  DEFAULT_LOCAL_API,
+  DEFAULT_X_PROMO_TWEET,
+  DIRS,
+  ENEMY_TYPES,
+  FIXED_DT,
+  MAZE_TEMPLATE,
+  REWARDS_API_TIMEOUT_MS,
+  SCORE_VALUES,
+  SESSION_EVENTS_BATCH_SIZE,
+  SESSION_EVENTS_BUFFER_LIMIT,
+  SESSION_RETRY_DELAY_MS,
+  TILE,
+  WALLET_CONNECT_TIMEOUT_MS,
+} from "./modules/constants.js";
+import { apiGetJson, apiPostJson } from "./modules/http-client.js";
+import { renderScene } from "./modules/render-system.js";
+import { getFingerprint, isValidMassaAddress, normalizeXProfile } from "./modules/rewards-helpers.js";
+import { discoverWalletCandidates, getCandidateAccounts, signChallenge } from "./modules/wallet-service.js";
+
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
 const startButton = document.getElementById("start-btn");
@@ -16,60 +40,6 @@ const claimButton = document.getElementById("claim-btn");
 const claimStatus = document.getElementById("claim-status");
 const devWinButton = document.getElementById("dev-win-btn");
 
-const BASE_WIDTH = 960;
-const BASE_HEIGHT = 640;
-const TILE = 32;
-const FIXED_DT = 1 / 60;
-
-const REWARDS_API_TIMEOUT_MS = 11_000;
-const DEFAULT_LOCAL_API = "http://127.0.0.1:8787";
-const DEFAULT_DEBUG_WIN_SCORE = 106_050;
-const DEFAULT_X_PROMO_TWEET = "https://x.com/massalabs";
-const SESSION_EVENTS_BATCH_SIZE = 64;
-const SESSION_EVENTS_BUFFER_LIMIT = 1200;
-const SESSION_RETRY_DELAY_MS = 2500;
-const WALLET_CONNECT_TIMEOUT_MS = 9000;
-const WALLET_PROVIDER_MODULE_URL = "https://cdn.jsdelivr.net/npm/@massalabs/wallet-provider@3.3.0/+esm";
-const CLAIM_VERIFICATION_MODE = "wallet_signature";
-
-const SCORE_VALUES = {
-  // Tuned so a full clear gives ~100k points (without heavy enemy farming).
-  PELLET: 350,
-  POWER_PELLET: 1500,
-  ENEMY_BASE: 2500,
-  ENEMY_COMBO_STEP: 1000,
-  ROUND_CLEAR_BONUS: 12000,
-};
-
-const DIRS = {
-  left: { x: -1, y: 0 },
-  right: { x: 1, y: 0 },
-  up: { x: 0, y: -1 },
-  down: { x: 0, y: 1 },
-};
-
-const MAZE_TEMPLATE = [
-  "############################",
-  "#............##............#",
-  "#.####.#####....#####.####.#",
-  "#*####.#####.##.#####.####*#",
-  "#..........................#",
-  "#.####.##.########.##.####.#",
-  "#......##....##....##......#",
-  "######.#####.##.#####.######",
-  "######.##..........##.######",
-  "######.##..........##.######",
-  "######.##..........##.######",
-  "#..........#....#..........#",
-  "#.####.#####.##.#####.####.#",
-  "#*..##................##..*#",
-  "###.##.##.########.##.##.###",
-  "#......##....##....##......#",
-  "#.##########.##.##########.#",
-  "#..........................#",
-  "############################",
-];
-
 const MAZE_ROWS = MAZE_TEMPLATE.length;
 const MAZE_COLS = MAZE_TEMPLATE[0].length;
 const MAZE_WIDTH = MAZE_COLS * TILE;
@@ -77,6 +47,10 @@ const MAZE_HEIGHT = MAZE_ROWS * TILE;
 const MAZE_OFFSET_X = Math.floor((BASE_WIDTH - MAZE_WIDTH) / 2);
 const MAZE_OFFSET_Y = Math.floor((BASE_HEIGHT - MAZE_HEIGHT) / 2);
 
+/**
+ * Central mutable runtime state of the game session.
+ * Kept in one object to simplify serialization and UI debug snapshots.
+ */
 const STATE = {
   mode: "title",
   score: 0,
@@ -128,15 +102,22 @@ const images = {
   pepe: loadImage("../assets/memes/pepe.png"),
 };
 
-const enemyTypes = ["doge", "shiba", "pepe", "doge", "shiba", "pepe"];
-
 const keysPressed = new Set();
 let audioCtx = null;
 let animationFrame = null;
 let lastTs = 0;
 let accumulator = 0;
-let walletProviderModulePromise = null;
 
+// ------------------------------------------------------------
+// Bootstrap / environment helpers
+// ------------------------------------------------------------
+
+/**
+ * Loads image asset relative to current module URL.
+ *
+ * @param {string} src - Relative asset path.
+ * @returns {HTMLImageElement}
+ */
 function loadImage(src) {
   const img = new Image();
   // Resolve URLs relative to this module file (works on GitHub Pages subpaths).
@@ -174,6 +155,11 @@ function getPromoTweetOverrideUrl() {
   return "";
 }
 
+/**
+ * Applies promo tweet URL to local state and reward panel link.
+ *
+ * @param {string} url - Candidate URL from config/query/backend.
+ */
 function applyPromoTweetUrl(url) {
   const normalized = (url || "").trim() || DEFAULT_X_PROMO_TWEET;
   STATE.rewards.promoTweetUrl = normalized;
@@ -189,6 +175,10 @@ function isDebugToolsEnabled() {
   const isDevParamEnabled = new URLSearchParams(window.location.search).get("dev") === "1";
   return isLocalHost && isDevParamEnabled;
 }
+
+// ------------------------------------------------------------
+// Rewards panel + wallet connection UI
+// ------------------------------------------------------------
 
 function setClaimStatus(text) {
   STATE.rewards.claimStatusText = text;
@@ -243,255 +233,8 @@ function updateTopWalletButton() {
   topWalletButton.textContent = `${STATE.rewards.walletProviderName || "Wallet"}: ${shortAddress}`;
 }
 
-function normalizeXProfile(input) {
-  const trimmed = input.trim();
-  const match = /^https:\/\/x\.com\/([A-Za-z0-9_]{1,15})\/?$/.exec(trimmed);
-  if (!match) {
-    return null;
-  }
-  return `https://x.com/${match[1].toLowerCase()}`;
-}
-
-function isValidMassaAddress(input) {
-  return /^A[US][1-9A-HJ-NP-Za-km-z]{20,120}$/.test(input.trim());
-}
-
-function getInstallId() {
-  const key = "fpom_install_id";
-  const existing = window.localStorage.getItem(key);
-  if (existing) {
-    return existing;
-  }
-  const created = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-  window.localStorage.setItem(key, created);
-  return created;
-}
-
-function getFingerprint() {
-  const payload = {
-    installId: getInstallId(),
-    ua: navigator.userAgent || "",
-    lang: navigator.language || "",
-    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
-    platform: navigator.platform || "",
-  };
-  return JSON.stringify(payload);
-}
-
-function normalizeAddressResult(value) {
-  if (!value) return "";
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    const firstString = value.find((entry) => typeof entry === "string");
-    if (typeof firstString === "string") {
-      return firstString;
-    }
-    const firstObj = value.find((entry) => entry && typeof entry === "object");
-    if (firstObj && typeof firstObj.address === "string") {
-      return firstObj.address;
-    }
-    return "";
-  }
-  if (typeof value === "object" && typeof value.address === "string") {
-    return value.address;
-  }
-  return "";
-}
-
-function normalizeSignatureResult(value) {
-  if (!value) {
-    return "";
-  }
-  if (typeof value === "string") {
-    return value.trim();
-  }
-  if (typeof value === "object") {
-    if (typeof value.signature === "string" && value.signature.trim()) {
-      return value.signature.trim();
-    }
-    if (typeof value.result === "string" && value.result.trim()) {
-      return value.result.trim();
-    }
-    if (typeof value.signedMessage === "string" && value.signedMessage.trim()) {
-      return value.signedMessage.trim();
-    }
-    return JSON.stringify(value);
-  }
-  return "";
-}
-
-function walletNameToLabel(rawName) {
-  const normalized = String(rawName || "").toLowerCase();
-  if (normalized.includes("massa")) {
-    return "Massa Wallet";
-  }
-  if (normalized.includes("bearby")) {
-    return "Bearby";
-  }
-  if (normalized.includes("meta")) {
-    return "MetaMask";
-  }
-  return String(rawName || "Wallet");
-}
-
-function walletNameToId(rawName) {
-  const normalized = String(rawName || "wallet")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return normalized || "wallet";
-}
-
-function withTimeout(promise, timeoutMs, timeoutCode = "operation_timeout") {
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      reject(new Error(timeoutCode));
-    }, timeoutMs);
-
-    Promise.resolve(promise)
-      .then((value) => {
-        clearTimeout(timeoutId);
-        resolve(value);
-      })
-      .catch((error) => {
-        clearTimeout(timeoutId);
-        reject(error);
-      });
-  });
-}
-
-async function loadWalletProviderModule() {
-  if (walletProviderModulePromise) {
-    return walletProviderModulePromise;
-  }
-
-  walletProviderModulePromise = import(WALLET_PROVIDER_MODULE_URL).catch((error) => {
-    walletProviderModulePromise = null;
-    throw error;
-  });
-
-  return walletProviderModulePromise;
-}
-
-function detectLegacyWalletProviders() {
-  return [
-    {
-      id: "legacy:massa_wallet",
-      name: "Massa Wallet",
-      source: "legacy",
-      provider: window.massaWallet || window.massa || window.massaWalletProvider,
-    },
-    {
-      id: "legacy:bearby",
-      name: "Bearby",
-      source: "legacy",
-      provider: window.bearby || window.bearbyWallet || window.web3?.wallet || window.web3,
-    },
-  ].filter((item) => item.provider);
-}
-
-async function detectWalletProviders() {
-  const candidates = [];
-
-  try {
-    const module = await loadWalletProviderModule();
-    if (typeof module?.getWallets === "function") {
-      const wallets = await module.getWallets();
-      wallets.forEach((wallet, index) => {
-        const rawName = typeof wallet?.name === "function" ? wallet.name() : "";
-        const label = walletNameToLabel(rawName);
-        const safeId = walletNameToId(rawName);
-        candidates.push({
-          id: `sdk:${safeId}:${index}`,
-          name: label,
-          source: "wallet_provider",
-          wallet,
-        });
-      });
-    }
-  } catch {
-    // Fallback to legacy window-based providers.
-  }
-
-  const seen = new Set(candidates.map((entry) => entry.name.toLowerCase()));
-  for (const legacyProvider of detectLegacyWalletProviders()) {
-    const dedupeKey = legacyProvider.name.toLowerCase();
-    if (seen.has(dedupeKey)) {
-      continue;
-    }
-    seen.add(dedupeKey);
-    candidates.push(legacyProvider);
-  }
-
-  return candidates;
-}
-
-async function requestLegacyProviderAddress(provider) {
-  const attempts = [
-    async () => provider?.request?.({ method: "massa_requestAccounts" }),
-    async () => provider?.request?.({ method: "wallet_requestAccounts" }),
-    async () => provider?.request?.({ method: "eth_requestAccounts" }),
-    async () => provider?.connect?.(),
-    async () => provider?.enable?.(),
-    async () => provider?.getAccount?.(),
-    async () => provider?.getAccounts?.(),
-  ];
-
-  for (const attempt of attempts) {
-    try {
-      const result = await attempt();
-      const address = normalizeAddressResult(result);
-      if (address) {
-        return address;
-      }
-    } catch {
-      // Continue trying known methods
-    }
-  }
-
-  return "";
-}
-
-async function requestWalletProviderAccounts(wallet) {
-  if (!wallet) {
-    return [];
-  }
-
-  try {
-    if (typeof wallet.connect === "function") {
-      await wallet.connect();
-    }
-  } catch {
-    // Keep going and still try to read accounts.
-  }
-
-  try {
-    const accounts = await wallet.accounts();
-    if (!Array.isArray(accounts)) {
-      return [];
-    }
-
-    const seen = new Set();
-    const accountOptions = [];
-    for (const account of accounts) {
-      const address = normalizeAddressResult(account).trim();
-      if (!isValidMassaAddress(address)) {
-        continue;
-      }
-      if (seen.has(address)) {
-        continue;
-      }
-      seen.add(address);
-      accountOptions.push({ address, account });
-    }
-    return accountOptions;
-  } catch {
-    return [];
-  }
-}
-
 async function refreshWalletProviders() {
-  const candidates = await detectWalletProviders();
+  const candidates = await discoverWalletCandidates();
   STATE.rewards.walletProviders = candidates;
   return candidates;
 }
@@ -531,6 +274,12 @@ function setWalletModalSubtitle(text) {
   walletModalSubtitle.hidden = normalized.length === 0;
 }
 
+/**
+ * Renders account picker UI for multi-account Massa Wallet case.
+ *
+ * @param {any} candidate - Selected wallet candidate metadata.
+ * @param {Array<{address: string; account: any}>} accountOptions - Available wallet accounts.
+ */
 function renderWalletAccountPicker(candidate, accountOptions) {
   if (!walletOptions) {
     return;
@@ -577,7 +326,7 @@ function renderWalletAccountPicker(candidate, accountOptions) {
 
   actions.append(backButton, connectButton);
   walletOptions.append(select, actions);
-  setWalletStatus("Massa Wallet: choose account");
+  setWalletStatus(`${candidate.name}: choose account`);
   setClaimStatus("Choose account and confirm");
 }
 
@@ -587,6 +336,9 @@ function closeWalletModal() {
   }
 }
 
+/**
+ * Opens wallet modal and renders detected providers.
+ */
 async function openWalletModal() {
   if (!walletModal || !walletOptions) {
     return;
@@ -648,6 +400,12 @@ async function openWalletModal() {
   walletModal.hidden = false;
 }
 
+/**
+ * Connects wallet provider and stores selected account in STATE.
+ *
+ * @param {string} [preferredWalletId] - Candidate id selected in modal.
+ * @returns {Promise<{status: \"connected\" | \"select_account\"; address?: string}>}
+ */
 async function connectWalletAddress(preferredWalletId = "") {
   setWalletModalPending(true);
   try {
@@ -665,37 +423,22 @@ async function connectWalletAddress(preferredWalletId = "") {
 
     for (const candidate of prioritizedCandidates) {
       try {
-        let address = "";
-        let walletAccount = null;
+        const connectedAccounts = await getCandidateAccounts(candidate, {
+          timeoutMs: WALLET_CONNECT_TIMEOUT_MS,
+          isValidAddress: isValidMassaAddress,
+        });
 
-        if (candidate.source === "wallet_provider") {
-          const connectedAccounts = await withTimeout(
-            requestWalletProviderAccounts(candidate.wallet),
-            WALLET_CONNECT_TIMEOUT_MS,
-            "wallet_connect_timeout",
-          );
-
-          if (candidate.name === "Massa Wallet" && connectedAccounts.length > 1) {
-            renderWalletAccountPicker(candidate, connectedAccounts);
-            return { status: "select_account" };
-          }
-
-          if (connectedAccounts.length > 0) {
-            address = connectedAccounts[0].address;
-            walletAccount = connectedAccounts[0].account;
-          }
-        } else {
-          address = await withTimeout(
-            requestLegacyProviderAddress(candidate.provider),
-            WALLET_CONNECT_TIMEOUT_MS,
-            "wallet_connect_timeout",
-          );
+        if (connectedAccounts.length > 1) {
+          renderWalletAccountPicker(candidate, connectedAccounts);
+          return { status: "select_account" };
         }
 
-        if (!isValidMassaAddress(address)) {
+        if (connectedAccounts.length === 0) {
           continue;
         }
 
+        const address = connectedAccounts[0].address;
+        const walletAccount = connectedAccounts[0].account;
         applyConnectedWallet(candidate, address, walletAccount);
         return { status: "connected", address };
       } catch {
@@ -709,95 +452,43 @@ async function connectWalletAddress(preferredWalletId = "") {
   }
 }
 
+/**
+ * Signs backend challenge using connected wallet account/provider.
+ *
+ * @param {string} challenge - Challenge text from backend.
+ * @returns {Promise<string>}
+ */
 async function signWithWallet(challenge) {
-  const account = STATE.rewards.walletAccount;
-  if (account && typeof account.sign === "function") {
-    try {
-      const signatureResult = await account.sign(new TextEncoder().encode(challenge));
-      const normalized = normalizeSignatureResult(signatureResult);
-      if (normalized) {
-        return normalized;
-      }
-    } catch {
-      // Fallback to provider-level methods below.
-    }
-  }
-
-  const provider = STATE.rewards.walletProvider;
-  if (!provider) {
-    throw new Error("wallet_not_connected");
-  }
-
-  const methods = [
-    async () => provider?.request?.({ method: "massa_signMessage", params: [challenge] }),
-    async () => provider?.request?.({ method: "personal_sign", params: [challenge, STATE.rewards.connectedAddress] }),
-    async () => provider?.signMessage?.(challenge),
-    async () => provider?.sign?.(challenge),
-  ];
-
-  for (const method of methods) {
-    try {
-      const result = await method();
-      const normalized = normalizeSignatureResult(result);
-      if (normalized) {
-        return normalized;
-      }
-    } catch {
-      // Keep trying known methods
-    }
-  }
-
-  throw new Error("wallet_sign_failed");
+  return signChallenge({
+    walletAccount: STATE.rewards.walletAccount,
+    walletProvider: STATE.rewards.walletProvider,
+    connectedAddress: STATE.rewards.connectedAddress,
+    challenge,
+  });
 }
 
+/**
+ * Rewards backend POST helper bound to configured API base URL.
+ */
 async function apiPost(path, body) {
   const base = STATE.rewards.apiBase;
   if (!base) {
     throw new Error("Rewards API is not configured");
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REWARDS_API_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${base}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const errorCode = json.error ? String(json.error) : `http_${response.status}`;
-      throw new Error(errorCode);
-    }
-    return json;
-  } finally {
-    clearTimeout(timer);
-  }
+  return apiPostJson(base, path, body, REWARDS_API_TIMEOUT_MS);
 }
 
+/**
+ * Rewards backend GET helper bound to configured API base URL.
+ */
 async function apiGet(path) {
   const base = STATE.rewards.apiBase;
   if (!base) {
     throw new Error("Rewards API is not configured");
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REWARDS_API_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${base}${path}`, {
-      method: "GET",
-      signal: controller.signal,
-    });
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const errorCode = json.error ? String(json.error) : `http_${response.status}`;
-      throw new Error(errorCode);
-    }
-    return json;
-  } finally {
-    clearTimeout(timer);
-  }
+  return apiGetJson(base, path, REWARDS_API_TIMEOUT_MS);
 }
 
 async function syncPromoTweetFromBackend() {
@@ -831,6 +522,10 @@ function maybeSyncPromoTweetFromBackend() {
   syncPromoTweetFromBackend().catch(() => {});
 }
 
+// ------------------------------------------------------------
+// Session telemetry helpers (anti-abuse signals for backend)
+// ------------------------------------------------------------
+
 function getRunElapsedMs() {
   if (!STATE.runStats.startedAtMs) {
     return 0;
@@ -838,6 +533,12 @@ function getRunElapsedMs() {
   return Math.max(1, Math.floor(performance.now() - STATE.runStats.startedAtMs));
 }
 
+/**
+ * Queues gameplay telemetry event for batched backend upload.
+ *
+ * @param {string} type - Event name.
+ * @param {Record<string, unknown>} payload - Event payload.
+ */
 function queueSessionEvent(type, payload = {}) {
   if (!STATE.rewards.apiBase) {
     return;
@@ -856,6 +557,11 @@ function queueSessionEvent(type, payload = {}) {
   });
 }
 
+/**
+ * Flushes buffered telemetry events to backend in batches.
+ *
+ * @param {boolean} [force=false] - When true, flushes all pending events.
+ */
 async function flushSessionEvents(force = false) {
   if (!STATE.rewards.apiBase) {
     return;
@@ -892,6 +598,12 @@ async function flushSessionEvents(force = false) {
   }
 }
 
+/**
+ * Ensures rewards session exists and is synced with backend.
+ *
+ * @param {boolean} [force=false] - Skip retry cooldown.
+ * @returns {Promise<string | null>}
+ */
 async function ensureRewardsSession(force = false) {
   if (STATE.rewards.sessionId) {
     return STATE.rewards.sessionId;
@@ -916,6 +628,11 @@ async function ensureRewardsSession(force = false) {
   }
 }
 
+/**
+ * Builds compact run summary used for claim verification.
+ *
+ * @returns {{durationMs: number; finalScoreClient: number; pelletsEaten: number; powerPelletsEaten: number; enemiesEaten: number; won: boolean}}
+ */
 function getRunSummary() {
   const durationMs = getRunElapsedMs();
   return {
@@ -957,6 +674,10 @@ function triggerDebugVictory() {
   setClaimStatus("Debug victory enabled: submit reward claim");
   showOverlay("FPOM Wins", "Play Again");
 }
+
+// ------------------------------------------------------------
+// World initialization and entity factories
+// ------------------------------------------------------------
 
 function initMaze() {
   STATE.pellets = [];
@@ -1026,7 +747,7 @@ function createEnemy(type, idx) {
 
 function resetEntities() {
   STATE.player = createPlayer();
-  STATE.enemies = enemyTypes.map((type, i) => createEnemy(type, i));
+  STATE.enemies = ENEMY_TYPES.map((type, i) => createEnemy(type, i));
   STATE.powerTimer = 0;
   STATE.combo = 0;
   STATE.roundResetTimer = 0;
@@ -1105,6 +826,10 @@ function showOverlay(text, buttonLabel) {
   }
 }
 
+// ------------------------------------------------------------
+// Audio helpers
+// ------------------------------------------------------------
+
 function ensureAudioContext() {
   if (audioCtx) {
     return;
@@ -1116,6 +841,9 @@ function ensureAudioContext() {
   audioCtx = new AudioContext();
 }
 
+/**
+ * Plays short procedural retro tone.
+ */
 function playTone(freq, duration = 0.08, type = "square", volume = 0.05) {
   if (!audioCtx || audioCtx.state === "suspended") {
     return;
@@ -1132,6 +860,10 @@ function playTone(freq, duration = 0.08, type = "square", volume = 0.05) {
   osc.start(now);
   osc.stop(now + duration);
 }
+
+// ------------------------------------------------------------
+// Movement, collision and gameplay update loop
+// ------------------------------------------------------------
 
 function worldToTile(x, y) {
   return {
@@ -1196,6 +928,9 @@ function tryApplyDesiredDirection(forceSnap = false) {
   return false;
 }
 
+/**
+ * Updates player movement and desired direction application.
+ */
 function updatePlayer(dt) {
   const player = STATE.player;
   if (!player.alive) return;
@@ -1424,6 +1159,11 @@ function handleEnemyCollisions() {
   }
 }
 
+/**
+ * Fixed-step gameplay update.
+ *
+ * @param {number} dt - Delta time in seconds.
+ */
 function update(dt) {
   if (STATE.mode !== "playing" || STATE.paused) {
     updateEffects(dt);
@@ -1454,246 +1194,30 @@ function update(dt) {
   handleEnemyCollisions();
 }
 
-function drawMazeBackground() {
-  const gradient = ctx.createLinearGradient(0, MAZE_OFFSET_Y, 0, MAZE_OFFSET_Y + MAZE_HEIGHT);
-  gradient.addColorStop(0, "#170f29");
-  gradient.addColorStop(1, "#29173b");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(MAZE_OFFSET_X, MAZE_OFFSET_Y, MAZE_WIDTH, MAZE_HEIGHT);
-
-  ctx.save();
-  ctx.globalAlpha = 0.1;
-  for (let row = 0; row < MAZE_ROWS; row += 1) {
-    const y = MAZE_OFFSET_Y + row * TILE;
-    ctx.fillStyle = row % 2 === 0 ? "#ffd7a0" : "#ffffff";
-    ctx.fillRect(MAZE_OFFSET_X, y, MAZE_WIDTH, 2);
-  }
-  ctx.restore();
-}
-
-function drawWalls() {
-  for (let row = 0; row < MAZE_ROWS; row += 1) {
-    for (let col = 0; col < MAZE_COLS; col += 1) {
-      if (STATE.maze[row][col] !== "#") continue;
-      const x = MAZE_OFFSET_X + col * TILE;
-      const y = MAZE_OFFSET_Y + row * TILE;
-
-      const wallGradient = ctx.createLinearGradient(x, y, x + TILE, y + TILE);
-      wallGradient.addColorStop(0, "#2e6df7");
-      wallGradient.addColorStop(1, "#51e8ff");
-      ctx.fillStyle = wallGradient;
-      ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x + 3, y + 3, TILE - 6, TILE - 6);
-    }
-  }
-}
-
-function drawPellets() {
-  for (const pellet of STATE.pellets) {
-    if (pellet.eaten) continue;
-    const c = tileCenter(pellet.col, pellet.row);
-    const pulse = 0.75 + Math.sin(STATE.elapsed * 5 + pellet.col) * 0.2;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, pellet.power ? 7 * pulse : 3.4, 0, Math.PI * 2);
-    ctx.fillStyle = pellet.power ? "#ff6f6f" : "#ffd773";
-    ctx.fill();
-  }
-}
-
-function applyDirectionalTransform(dir) {
-  if (dir === "left") {
-    ctx.scale(-1, 1);
-    return;
-  }
-  if (dir === "down") {
-    ctx.rotate(Math.PI / 2);
-    return;
-  }
-  if (dir === "up") {
-    ctx.rotate(Math.PI / 2);
-    ctx.scale(-1, 1);
-  }
-}
-
-function drawPlayer() {
-  const p = STATE.player;
-  const facing = p.dir === "left" ? Math.PI : p.dir === "up" ? -Math.PI / 2 : p.dir === "down" ? Math.PI / 2 : 0;
-  const mouth = 0.24 + Math.abs(Math.sin(p.mouthPhase)) * 0.2;
-
-  ctx.save();
-  ctx.translate(p.x, p.y);
-
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.arc(0, 0, p.r + 2, facing + mouth, facing - mouth, false);
-  ctx.closePath();
-  ctx.clip();
-
-  const glow = STATE.powerTimer > 0 ? 8 : 3;
-  ctx.shadowColor = STATE.powerTimer > 0 ? "#ff4444" : "#fff3b0";
-  ctx.shadowBlur = glow;
-  applyDirectionalTransform(p.dir);
-  ctx.drawImage(images.fpom, -(p.r + 4), -(p.r + 4), (p.r + 4) * 2, (p.r + 4) * 2);
-
-  ctx.restore();
-
-  if (STATE.powerTimer > 0) {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r + 5 + Math.sin(STATE.elapsed * 10) * 1.5, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(255, 70, 70, 0.5)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-}
-
-function drawEnemy(enemy) {
-  if (enemy.respawnTimer > 0) {
-    return;
-  }
-
-  const size = enemy.r * 2.3;
-  ctx.save();
-  ctx.translate(enemy.x, enemy.y);
-
-  if (STATE.powerTimer > 0) {
-    const blink = Math.sin(enemy.blink * 16) > 0 ? 0.55 : 0.25;
-    ctx.fillStyle = `rgba(20, 120, 255, ${blink})`;
-    ctx.beginPath();
-    ctx.arc(0, 0, enemy.r + 6, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const img = images[enemy.type];
-  if (img.complete) {
-    applyDirectionalTransform(enemy.dir);
-    if (enemy.type === "pepe") {
-      ctx.beginPath();
-      ctx.arc(0, 0, enemy.r + 0.5, 0, Math.PI * 2);
-      ctx.clip();
-    }
-    ctx.drawImage(img, -size / 2, -size / 2, size, size);
-  } else {
-    ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.arc(0, 0, enemy.r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.restore();
-}
-
-function drawEffects() {
-  for (const e of STATE.effects) {
-    const alpha = Math.max(0, Math.min(1, e.life / e.maxLife));
-    const img = images[e.spriteKey];
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    ctx.rotate(e.rotation);
-    ctx.globalAlpha = alpha;
-    if (img?.complete) {
-      ctx.drawImage(
-        img,
-        e.srcX,
-        e.srcY,
-        e.srcSize,
-        e.srcSize,
-        -e.size / 2,
-        -e.size / 2,
-        e.size,
-        e.size,
-      );
-    } else {
-      ctx.fillStyle = "rgba(255, 120, 120, 0.85)";
-      ctx.fillRect(-e.size / 2, -e.size / 2, e.size, e.size);
-    }
-    ctx.restore();
-  }
-}
-
-function drawHud() {
-  ctx.fillStyle = "#fff7e0";
-  ctx.font = '16px "Press Start 2P", monospace';
-  ctx.fillText(`Score ${STATE.score}`, 22, 28);
-  ctx.fillText(`Lives ${STATE.lives}`, 22, 54);
-
-  if (STATE.powerTimer > 0) {
-    ctx.fillStyle = "#ff9d9d";
-    ctx.fillText(`HUNT ${STATE.powerTimer.toFixed(1)}s`, BASE_WIDTH - 290, 28);
-  }
-
-  if (STATE.paused && STATE.mode === "playing") {
-    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
-    ctx.fillStyle = "#fff";
-    ctx.font = '22px "Bungee", sans-serif';
-    ctx.fillText("PAUSED", BASE_WIDTH / 2 - 78, BASE_HEIGHT / 2);
-  }
-}
-
-function drawModeBanner() {
-  if (STATE.mode === "playing") {
-    return;
-  }
-
-  const cardW = 760;
-  const cardH = 280;
-  const x = (BASE_WIDTH - cardW) / 2;
-  const y = (BASE_HEIGHT - cardH) / 2;
-
-  ctx.fillStyle = "rgba(9, 6, 25, 0.7)";
-  ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
-
-  ctx.fillStyle = "rgba(255, 245, 225, 0.95)";
-  ctx.fillRect(x, y, cardW, cardH);
-  ctx.strokeStyle = "#ff4f34";
-  ctx.lineWidth = 4;
-  ctx.strokeRect(x + 2, y + 2, cardW - 4, cardH - 4);
-
-  let title = "FPOM Meme Hunt";
-  if (STATE.mode === "gameover") title = "Game Over";
-  if (STATE.mode === "won") title = "FPOM Wins";
-
-  ctx.fillStyle = "#5a1208";
-  ctx.font = '44px "Bungee", sans-serif';
-  ctx.fillText(title, x + 72, y + 74);
-
-  ctx.fillStyle = "#2f1a15";
-  ctx.font = '12px "Press Start 2P", monospace';
-  ctx.fillText("No more scams. Gimme a serious fake.", x + 70, y + 112);
-  ctx.fillText("Move: WASD / Arrows  |  F: fullscreen  |  P: pause", x + 70, y + 148);
-  ctx.fillText("Collect memes. Eat red orb to hunt Doge, Shiba, Pepe.", x + 70, y + 176);
-  ctx.fillText("Press Enter / Space or click Start Hunt", x + 70, y + 218);
-}
+// ------------------------------------------------------------
+// Rendering and frame stepping
+// ------------------------------------------------------------
 
 function render() {
-  ctx.clearRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
-
-  const bg = ctx.createLinearGradient(0, 0, BASE_WIDTH, BASE_HEIGHT);
-  bg.addColorStop(0, "#260f31");
-  bg.addColorStop(1, "#3d1731");
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
-
-  drawMazeBackground();
-  drawWalls();
-  drawPellets();
-
-  for (const enemy of STATE.enemies) {
-    drawEnemy(enemy);
-  }
-
-  if (STATE.player) {
-    drawPlayer();
-  }
-  drawEffects();
-
-  drawHud();
-  drawModeBanner();
+  renderScene({
+    ctx,
+    state: STATE,
+    images,
+    baseWidth: BASE_WIDTH,
+    baseHeight: BASE_HEIGHT,
+    tile: TILE,
+    mazeRows: MAZE_ROWS,
+    mazeCols: MAZE_COLS,
+    mazeWidth: MAZE_WIDTH,
+    mazeHeight: MAZE_HEIGHT,
+    mazeOffsetX: MAZE_OFFSET_X,
+    mazeOffsetY: MAZE_OFFSET_Y,
+  });
 }
 
+/**
+ * RAF loop with fixed timestep accumulator.
+ */
 function gameLoop(ts) {
   if (!lastTs) {
     lastTs = ts;
@@ -1712,6 +1236,11 @@ function gameLoop(ts) {
   animationFrame = requestAnimationFrame(gameLoop);
 }
 
+/**
+ * Deterministic stepping hook used by Playwright automation.
+ *
+ * @param {number} ms - Virtual milliseconds to advance.
+ */
 function advanceTime(ms) {
   const steps = Math.max(1, Math.round(ms / (FIXED_DT * 1000)));
   for (let i = 0; i < steps; i += 1) {
@@ -1720,6 +1249,11 @@ function advanceTime(ms) {
   render();
 }
 
+/**
+ * Debug/state serialization used by automated testing tools.
+ *
+ * @returns {string}
+ */
 function renderGameToText() {
   const player = STATE.player
     ? {
@@ -1759,6 +1293,10 @@ function renderGameToText() {
     sample_active_pellets: activePellets,
   });
 }
+
+// ------------------------------------------------------------
+// Input / claim actions
+// ------------------------------------------------------------
 
 function handleDirectionInput(dir) {
   if (!STATE.player) return;
@@ -1980,6 +1518,9 @@ function setupEvents() {
   });
 }
 
+/**
+ * App entry point.
+ */
 function init() {
   STATE.rewards.apiBase = getRewardsApiBase();
   const promoTweetOverride = getPromoTweetOverrideUrl();
