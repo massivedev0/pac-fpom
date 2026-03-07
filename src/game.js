@@ -15,12 +15,12 @@ import {
   SESSION_EVENTS_BUFFER_LIMIT,
   SESSION_RETRY_DELAY_MS,
   TILE,
-  WALLET_CONNECT_TIMEOUT_MS,
 } from "./modules/constants.js";
 import { apiGetJson, apiPostJson } from "./modules/http-client.js";
 import { renderScene } from "./modules/render-system.js";
 import { getFingerprint, isValidMassaAddress, normalizeXProfile } from "./modules/rewards-helpers.js";
 import { discoverWalletCandidates, getCandidateAccounts, signChallenge } from "./modules/wallet-service.js";
+import { createWalletUiController } from "./modules/wallet-ui.js";
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
@@ -221,275 +221,23 @@ function setWalletStatus(text) {
 }
 
 /**
- * Refreshes wallet status line based on connection state
+ * Wallet modal and wallet-status controller
  */
-function updateWalletStatusForClaimPanel() {
-  const connectedAddress = STATE.rewards.connectedAddress || "";
-  if (isValidMassaAddress(connectedAddress)) {
-    const walletName = STATE.rewards.walletProviderName || "Wallet";
-    setWalletStatus(`${walletName} connected: ${connectedAddress}`);
-    return;
-  }
-  setWalletStatus("Use the Connect Wallet button in the top-right corner");
-}
-
-/**
- * Refreshes top wallet button label and state
- */
-function updateTopWalletButton() {
-  if (!topWalletButton) {
-    return;
-  }
-
-  const connectedAddress = STATE.rewards.connectedAddress;
-  if (!connectedAddress) {
-    topWalletButton.classList.remove("connected");
-    topWalletButton.textContent = "Connect Wallet";
-    return;
-  }
-
-  const shortAddress =
-    connectedAddress.length > 18
-      ? `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-6)}`
-      : connectedAddress;
-
-  topWalletButton.classList.add("connected");
-  topWalletButton.textContent = `${STATE.rewards.walletProviderName || "Wallet"}: ${shortAddress}`;
-}
-
-/**
- * Loads and stores current wallet candidates
- */
-async function refreshWalletProviders() {
-  const candidates = await discoverWalletCandidates();
-  STATE.rewards.walletProviders = candidates;
-  return candidates;
-}
-
-/**
- * Stores connected wallet identity and refreshes wallet UI
- */
-function applyConnectedWallet(candidate, address, walletAccount = null) {
-  STATE.rewards.connectedAddress = address.trim();
-  STATE.rewards.walletProvider = candidate.wallet || candidate.provider || null;
-  STATE.rewards.walletAccount = walletAccount;
-  STATE.rewards.walletProviderName = candidate.name;
-  updateWalletStatusForClaimPanel();
-  updateTopWalletButton();
-  closeWalletModal();
-}
-
-/**
- * Toggles pending state for wallet modal actions
- */
-function setWalletModalPending(pending) {
-  STATE.rewards.walletModalInFlight = pending;
-  if (topWalletButton) {
-    topWalletButton.disabled = pending;
-  }
-  if (walletModalClose) {
-    walletModalClose.disabled = pending;
-  }
-  if (walletOptions) {
-    const actionButtons = walletOptions.querySelectorAll("button, select");
-    for (const btn of actionButtons) {
-      btn.disabled = pending;
-    }
-  }
-}
-
-/**
- * Sets wallet modal subtitle text visibility and content
- */
-function setWalletModalSubtitle(text) {
-  if (!walletModalSubtitle) {
-    return;
-  }
-  const normalized = String(text || "").trim();
-  walletModalSubtitle.textContent = normalized;
-  walletModalSubtitle.hidden = normalized.length === 0;
-}
-
-/**
- * Renders account picker UI for multi-account wallet case
- *
- * @param {any} candidate Selected wallet candidate metadata
- * @param {Array<{address: string; account: any}>} accountOptions Available wallet accounts
- */
-function renderWalletAccountPicker(candidate, accountOptions) {
-  if (!walletOptions) {
-    return;
-  }
-
-  setWalletModalSubtitle("Choose Massa account");
-  walletOptions.textContent = "";
-
-  const select = document.createElement("select");
-  select.className = "wallet-account-select";
-  for (const option of accountOptions) {
-    const item = document.createElement("option");
-    item.value = option.address;
-    item.textContent = option.address;
-    select.append(item);
-  }
-
-  const actions = document.createElement("div");
-  actions.className = "wallet-picker-actions";
-
-  const backButton = document.createElement("button");
-  backButton.type = "button";
-  backButton.className = "wallet-picker-back-btn";
-  backButton.textContent = "Back";
-  backButton.addEventListener("click", () => {
-    openWalletModal().catch(() => {});
-  });
-
-  const connectButton = document.createElement("button");
-  connectButton.type = "button";
-  connectButton.className = "wallet-option-btn";
-  connectButton.textContent = "Connect selected";
-  connectButton.addEventListener("click", () => {
-    const selectedAddress = select.value;
-    const selectedAccount = accountOptions.find((item) => item.address === selectedAddress);
-    if (!selectedAccount) {
-      setClaimStatus("Select a valid wallet account");
-      return;
-    }
-
-    applyConnectedWallet(candidate, selectedAccount.address, selectedAccount.account);
-    setClaimStatus("Wallet connected. You can claim now");
-  });
-
-  actions.append(backButton, connectButton);
-  walletOptions.append(select, actions);
-  setWalletStatus(`${candidate.name}: choose account`);
-  setClaimStatus("Choose account and confirm");
-}
-
-/**
- * Closes wallet selection modal
- */
-function closeWalletModal() {
-  if (walletModal) {
-    walletModal.hidden = true;
-  }
-}
-
-/**
- * Opens wallet modal and renders detected providers
- */
-async function openWalletModal() {
-  if (!walletModal || !walletOptions) {
-    return;
-  }
-
-  setWalletModalSubtitle("");
-  walletOptions.textContent = "";
-  setWalletModalPending(true);
-  walletModal.hidden = false;
-
-  const loading = document.createElement("p");
-  loading.className = "wallet-options-empty";
-  loading.textContent = "Searching available wallets...";
-  walletOptions.append(loading);
-
-  let candidates = [];
-  try {
-    candidates = await refreshWalletProviders();
-  } catch {
-    candidates = [];
-  }
-
-  walletOptions.textContent = "";
-  setWalletModalPending(false);
-
-  if (candidates.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "wallet-options-empty";
-    empty.textContent = "No wallets found. Install/enable Massa Wallet or Bearby, then reload.";
-    walletOptions.append(empty);
-    updateWalletStatusForClaimPanel();
-    setClaimStatus("No wallets found. Install/enable Massa Wallet or Bearby, then reload.");
-    return;
-  }
-
-  for (const candidate of candidates) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "wallet-option-btn";
-    btn.textContent = candidate.name;
-    btn.addEventListener("click", () => {
-      setClaimStatus(`Connecting ${candidate.name}...`);
-      connectWalletAddress(candidate.id)
-        .then((result) => {
-          if (result.status === "connected") {
-            setClaimStatus("Wallet connected. You can claim now");
-          }
-        })
-        .catch((error) => {
-          const message = error instanceof Error ? error.message : "wallet_connect_failed";
-          setClaimStatus(`Wallet connection failed: ${message}`);
-        });
-    });
-    walletOptions.append(btn);
-  }
-
-  updateWalletStatusForClaimPanel();
-
-  walletModal.hidden = false;
-}
-
-/**
- * Connects wallet provider and stores selected account in STATE
- *
- * @param {string} [preferredWalletId] Candidate id selected in modal
- * @returns {Promise<{status: \"connected\" | \"select_account\"; address?: string}>}
- */
-async function connectWalletAddress(preferredWalletId = "") {
-  setWalletModalPending(true);
-  try {
-    const candidates = await refreshWalletProviders();
-    if (candidates.length === 0) {
-      throw new Error("massa_wallet_not_found");
-    }
-
-    const prioritizedCandidates = preferredWalletId
-      ? [
-          ...candidates.filter((candidate) => candidate.id === preferredWalletId),
-          ...candidates.filter((candidate) => candidate.id !== preferredWalletId),
-        ]
-      : candidates;
-
-    for (const candidate of prioritizedCandidates) {
-      try {
-        const connectedAccounts = await getCandidateAccounts(candidate, {
-          timeoutMs: WALLET_CONNECT_TIMEOUT_MS,
-          isValidAddress: isValidMassaAddress,
-        });
-
-        if (connectedAccounts.length > 1) {
-          renderWalletAccountPicker(candidate, connectedAccounts);
-          return { status: "select_account" };
-        }
-
-        if (connectedAccounts.length === 0) {
-          continue;
-        }
-
-        const address = connectedAccounts[0].address;
-        const walletAccount = connectedAccounts[0].account;
-        applyConnectedWallet(candidate, address, walletAccount);
-        return { status: "connected", address };
-      } catch {
-        // Try next provider if this one is unavailable or timed out.
-      }
-    }
-
-    throw new Error("wallet_connect_failed");
-  } finally {
-    setWalletModalPending(false);
-  }
-}
+const walletUi = createWalletUiController({
+  rewardsState: STATE.rewards,
+  dom: {
+    topWalletButton,
+    walletModal,
+    walletModalClose,
+    walletModalSubtitle,
+    walletOptions,
+  },
+  setClaimStatus,
+  setWalletStatus,
+  isValidMassaAddress,
+  discoverWalletCandidates,
+  getCandidateAccounts,
+});
 
 /**
  * Signs backend challenge using connected wallet account/provider
@@ -1576,7 +1324,7 @@ function onKeyDown(event) {
 
   if (isWalletModalOpen) {
     if (code === "Escape") {
-      closeWalletModal();
+      walletUi.closeWalletModal();
     }
     return;
   }
@@ -1628,20 +1376,20 @@ function setupEvents() {
   }
   if (topWalletButton) {
     topWalletButton.addEventListener("click", () => {
-      openWalletModal().catch(() => {
+      walletUi.openWalletModal().catch(() => {
         setClaimStatus("Failed to open wallet selector");
       });
     });
   }
   if (walletModalClose) {
     walletModalClose.addEventListener("click", () => {
-      closeWalletModal();
+      walletUi.closeWalletModal();
     });
   }
   if (walletModal) {
     walletModal.addEventListener("click", (event) => {
       if (event.target === walletModal) {
-        closeWalletModal();
+        walletUi.closeWalletModal();
       }
     });
   }
@@ -1683,8 +1431,8 @@ function init() {
   if (rewardPanel) {
     rewardPanel.hidden = true;
   }
-  updateTopWalletButton();
-  updateWalletStatusForClaimPanel();
+  walletUi.updateTopWalletButton();
+  walletUi.updateWalletStatusForClaimPanel();
   setClaimControlsDisabled(false);
   if (STATE.rewards.apiBase) {
     setClaimStatus(`Rewards API: ${STATE.rewards.apiBase}`);
