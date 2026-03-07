@@ -4,7 +4,14 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { type AppConfig, getConfig } from "./config.js";
 import { computeServerScore, normalizeRunSummary } from "./scoring.js";
-import { extractIpFromRequest, isLikelyMassaAddress, randomToken, sha256Hex } from "./utils.js";
+import {
+  extractIpFromRequest,
+  hmacSha256Hex,
+  isLikelyMassaAddress,
+  randomToken,
+  safeEqual,
+  sha256Hex,
+} from "./utils.js";
 
 const VERIFICATION_MODES = {
   wallet_signature: "wallet_signature",
@@ -89,6 +96,12 @@ type PayoutContext = {
   reason?: string;
 };
 
+type ManualReviewAction = "approve" | "reject";
+
+type PayoutOptions = {
+  bypassManualReviewGuards?: boolean;
+};
+
 const X_PROFILE_REGEX = /^https:\/\/x\.com\/([A-Za-z0-9_]{1,15})\/?$/;
 
 function normalizeXProfileUrl(input: string): string | null {
@@ -103,6 +116,114 @@ function normalizeXProfileUrl(input: string): string | null {
 
 function safeXProfile(value: string | null | undefined): string {
   return value ?? "https://x.com/unknown";
+}
+
+function escapeHtml(value: string | number | null | undefined): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function buildManualReviewToken(secret: string, claimId: string, action: ManualReviewAction): string {
+  return hmacSha256Hex(secret, `${claimId}:${action}`);
+}
+
+function isValidManualReviewToken(
+  secret: string,
+  claimId: string,
+  action: ManualReviewAction,
+  token: string,
+): boolean {
+  if (!secret || !token) {
+    return false;
+  }
+  const expected = buildManualReviewToken(secret, claimId, action);
+  return safeEqual(expected, token);
+}
+
+function buildManualReviewLink(
+  config: AppConfig,
+  claimId: string,
+  action: ManualReviewAction,
+): string | null {
+  if (!config.adminReviewBaseUrl || !config.adminReviewSecret) {
+    return null;
+  }
+  const token = buildManualReviewToken(config.adminReviewSecret, claimId, action);
+  return `${config.adminReviewBaseUrl}/admin/review/${encodeURIComponent(claimId)}?action=${action}&token=${token}`;
+}
+
+function renderAdminReviewPage(input: {
+  title: string;
+  summary: string;
+  claim?: {
+    id: string;
+    sessionId: string;
+    status: string;
+    address: string;
+    xProfile: string | null;
+    amount: number;
+    verificationMode: string;
+    txHash: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null;
+}): string {
+  const claim = input.claim;
+  const rows = claim
+    ? [
+        ["Claim ID", claim.id],
+        ["Session ID", claim.sessionId],
+        ["Status", claim.status],
+        ["Address", claim.address],
+        ["X profile", safeXProfile(claim.xProfile)],
+        ["Amount", `${claim.amount.toLocaleString("en-US")} FPOM`],
+        ["Verification", claim.verificationMode],
+        ["Tx hash", claim.txHash || "-"],
+        ["Created", claim.createdAt.toISOString()],
+        ["Updated", claim.updatedAt.toISOString()],
+      ]
+    : [];
+
+  const detailsHtml = rows
+    .map(
+      ([label, value]) =>
+        `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`,
+    )
+    .join("");
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtml(input.title)}</title>
+    <style>
+      body { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0f172a; color: #e2e8f0; }
+      main { max-width: 840px; margin: 0 auto; padding: 32px 20px 48px; }
+      h1 { margin: 0 0 12px; font-size: 32px; color: #f8fafc; }
+      p { margin: 0 0 20px; line-height: 1.6; color: #cbd5e1; }
+      .panel { border: 1px solid #334155; border-radius: 16px; background: #111827; overflow: hidden; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #1f2937; vertical-align: top; }
+      th { width: 180px; color: #93c5fd; }
+      td { color: #f8fafc; word-break: break-word; }
+      tr:last-child th, tr:last-child td { border-bottom: 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${escapeHtml(input.title)}</h1>
+      <p>${escapeHtml(input.summary)}</p>
+      <section class="panel">
+        <table>${detailsHtml}</table>
+      </section>
+    </main>
+  </body>
+</html>`;
 }
 
 function createLoggerOptions(config: AppConfig) {
@@ -198,7 +319,10 @@ function formatSlackPayoutMessage(context: PayoutContext): string {
     .join("\n");
 }
 
-function formatSlackManualReviewMessage(context: PayoutContext): string {
+function formatSlackManualReviewMessage(config: AppConfig, context: PayoutContext): string {
+  const approveLink = buildManualReviewLink(config, context.claimId, "approve");
+  const rejectLink = buildManualReviewLink(config, context.claimId, "reject");
+
   return [
     "FPOM manual review requested",
     `Reason: ${context.reason ?? "unknown"}`,
@@ -209,6 +333,8 @@ function formatSlackManualReviewMessage(context: PayoutContext): string {
     `Amount: ${context.amount.toLocaleString("en-US")} FPOM`,
     `Verification: ${context.verificationMode}`,
     context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
+    approveLink ? `Approve: ${approveLink}` : undefined,
+    rejectLink ? `Reject: ${rejectLink}` : undefined,
   ]
     .filter(Boolean)
     .join("\n");
@@ -556,7 +682,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     await sendSlackNotification(
       app,
       config,
-      formatSlackManualReviewMessage({
+      formatSlackManualReviewMessage(config, {
         claimId: claim.id,
         sessionId: claim.sessionId,
         address: claim.address,
@@ -574,7 +700,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     };
   }
 
-  async function enqueueAndProcessPayout(claimId: string) {
+  async function enqueueAndProcessPayout(claimId: string, options: PayoutOptions = {}) {
     const claim = await prisma.claim.findUnique({ where: { id: claimId } });
     if (!claim) {
       await writeAuditLog({
@@ -588,7 +714,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       };
     }
 
-    if (claim.amount > config.maxSinglePayoutAmount) {
+    if (!options.bypassManualReviewGuards && claim.amount > config.maxSinglePayoutAmount) {
       return markAsManualReview(
         { claimId: claim.id },
         `single_payout_limit_exceeded:${config.maxSinglePayoutAmount}`,
@@ -603,7 +729,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         updatedAt: { gte: last24h },
       },
     });
-    if (paidLast24h >= config.maxPayoutsPerDay) {
+    if (!options.bypassManualReviewGuards && paidLast24h >= config.maxPayoutsPerDay) {
       return markAsManualReview(
         { claimId: claim.id },
         `daily_payout_limit_exceeded:${config.maxPayoutsPerDay}`,
@@ -939,6 +1065,127 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return enqueueAndProcessPayout(claim.id);
   });
 
+  app.get("/admin/review/:claimId", async (req, reply) => {
+    const claimId = String((req.params as { claimId?: string })?.claimId || "").trim();
+    const actionRaw = String((req.query as { action?: string })?.action || "").trim().toLowerCase();
+    const token = String((req.query as { token?: string })?.token || "").trim();
+
+    if (!claimId) {
+      return reply
+        .code(400)
+        .type("text/html; charset=utf-8")
+        .send(
+          renderAdminReviewPage({
+            title: "Invalid review request",
+            summary: "Missing claim id",
+          }),
+        );
+    }
+
+    if (actionRaw !== "approve" && actionRaw !== "reject") {
+      return reply
+        .code(400)
+        .type("text/html; charset=utf-8")
+        .send(
+          renderAdminReviewPage({
+            title: "Invalid review request",
+            summary: "Unknown action. Use approve or reject",
+          }),
+        );
+    }
+
+    const action = actionRaw as ManualReviewAction;
+    if (!isValidManualReviewToken(config.adminReviewSecret, claimId, action, token)) {
+      return reply
+        .code(403)
+        .type("text/html; charset=utf-8")
+        .send(
+          renderAdminReviewPage({
+            title: "Review link rejected",
+            summary: "The manual review token is invalid or expired",
+          }),
+        );
+    }
+
+    const existingClaim = await prisma.claim.findUnique({ where: { id: claimId } });
+    if (!existingClaim) {
+      return reply
+        .code(404)
+        .type("text/html; charset=utf-8")
+        .send(
+          renderAdminReviewPage({
+            title: "Claim not found",
+            summary: "No claim exists for this review link",
+          }),
+        );
+    }
+
+    if (action === "approve") {
+      if (
+        existingClaim.status !== CLAIM_STATUSES.PAID &&
+        existingClaim.status !== CLAIM_STATUSES.REJECTED
+      ) {
+        await prisma.claim.update({
+          where: { id: claimId },
+          data: {
+            status: CLAIM_STATUSES.CONFIRMED,
+          },
+        });
+
+        await writeAuditLog({
+          event: "CLAIM_APPROVED_MANUAL",
+          claimId,
+          sessionId: existingClaim.sessionId,
+          address: existingClaim.address,
+          payload: {
+            previousStatus: existingClaim.status,
+          },
+        });
+
+        await enqueueAndProcessPayout(claimId, { bypassManualReviewGuards: true });
+      }
+    } else if (
+      existingClaim.status !== CLAIM_STATUSES.REJECTED &&
+      existingClaim.status !== CLAIM_STATUSES.PAID
+    ) {
+      await prisma.claim.update({
+        where: { id: claimId },
+        data: {
+          status: CLAIM_STATUSES.REJECTED,
+        },
+      });
+
+      await writeAuditLog({
+        level: "WARN",
+        event: "CLAIM_REJECTED_MANUAL",
+        claimId,
+        sessionId: existingClaim.sessionId,
+        address: existingClaim.address,
+        payload: {
+          previousStatus: existingClaim.status,
+        },
+      });
+    }
+
+    const updatedClaim = await prisma.claim.findUnique({ where: { id: claimId } });
+    const pageTitle = action === "approve" ? "Claim approved" : "Claim rejected";
+    const summary =
+      action === "approve"
+        ? "The claim action was applied and the latest claim state is shown below"
+        : "The claim was rejected and the latest claim state is shown below";
+
+    return reply
+      .code(200)
+      .type("text/html; charset=utf-8")
+      .send(
+        renderAdminReviewPage({
+          title: pageTitle,
+          summary,
+          claim: updatedClaim,
+        }),
+      );
+  });
+
   app.get("/claim/:claimId", async (req, reply) => {
     const claimId = (req.params as { claimId?: string })?.claimId?.trim();
     if (!claimId) {
@@ -991,6 +1238,8 @@ async function bootstrap() {
       fpomContractAddress: config.fpomContractAddress,
       xPromoTweet: config.xPromoTweet,
       slackWebhookConfigured: Boolean(config.slackWebhookUrl),
+      adminReviewBaseUrl: config.adminReviewBaseUrl,
+      adminReviewSecretConfigured: Boolean(config.adminReviewSecret),
       corsAllowedOrigins: config.corsAllowedOrigins,
     },
     "FPOM rewards backend started",

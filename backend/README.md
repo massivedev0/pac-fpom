@@ -17,6 +17,7 @@ A simple backend for issuing FPOM rewards after a completed round
 - Manual review guardrails for oversized payout and daily payout volume
 - Audit log table in DB for claim verification and payout events
 - Slack webhook notifications for payout and manual review events
+- Secure approve/reject links for manual review in Slack notifications
 - CLI log viewer with fixed-width columns and colors
 
 ## Quick start
@@ -83,6 +84,8 @@ Main ones:
 - `MAX_SINGLE_PAYOUT_AMOUNT`
 - `MAX_PAYOUTS_PER_DAY`
 - `X_PROMO_TWEET`
+- `ADMIN_REVIEW_BASE_URL`
+- `ADMIN_REVIEW_SECRET`
 - `MAX_CLAIMS_PER_ADDRESS`
 - `MAX_CLAIMS_PER_X_PROFILE`
 - `IP_CLAIMS_PER_DAY_LIMIT`

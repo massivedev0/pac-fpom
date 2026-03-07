@@ -3,6 +3,7 @@ import test from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { type AppConfig } from "../src/config.js";
 import { createApp } from "../src/server.js";
+import { hmacSha256Hex } from "../src/utils.js";
 
 const BASE_CONFIG: AppConfig = {
   host: "127.0.0.1",
@@ -14,6 +15,8 @@ const BASE_CONFIG: AppConfig = {
   maxSinglePayoutAmount: 300_000,
   maxPayoutsPerDay: 50,
   slackWebhookUrl: "",
+  adminReviewBaseUrl: "http://localhost:8787",
+  adminReviewSecret: "test-review-secret",
   maxClaimsPerAddress: 2,
   maxClaimsPerXProfile: 2,
   ipClaimsPerDayLimit: 10,
@@ -382,6 +385,98 @@ test("claim should go to manual review when payout exceeds single amount limit",
     const body = confirmResponse.json() as { status: string; reason: string };
     assert.equal(body.status, "MANUAL_REVIEW");
     assert.match(body.reason, /single_payout_limit_exceeded/);
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("manual review approve link should auto-pay claim and render claim details", async () => {
+  const context = await createTestContext({
+    maxSinglePayoutAmount: 100_000,
+  });
+
+  try {
+    const session = await startSession(context.app);
+
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      run: {
+        ...WINNING_RUN,
+        enemiesEaten: 80,
+        finalScoreClient: 301_050,
+      },
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string };
+
+    const confirmResponse = await confirmClaim(context.app, {
+      claimId: prepared.claimId,
+    });
+
+    assert.equal(confirmResponse.statusCode, 200);
+    const approveToken = hmacSha256Hex(BASE_CONFIG.adminReviewSecret, `${prepared.claimId}:approve`);
+    const reviewResponse = await context.app.inject({
+      method: "GET",
+      url: `/admin/review/${prepared.claimId}?action=approve&token=${approveToken}`,
+    });
+
+    assert.equal(reviewResponse.statusCode, 200);
+    assert.match(reviewResponse.body, /Claim approved/);
+    assert.match(reviewResponse.body, /PAID/);
+
+    const claim = await context.prisma.claim.findUnique({ where: { id: prepared.claimId } });
+    assert.ok(claim);
+    assert.equal(claim.status, "PAID");
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("manual review reject link should reject claim and render claim details", async () => {
+  const context = await createTestContext({
+    maxSinglePayoutAmount: 100_000,
+  });
+
+  try {
+    const session = await startSession(context.app);
+
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      run: {
+        ...WINNING_RUN,
+        enemiesEaten: 80,
+        finalScoreClient: 301_050,
+      },
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string };
+
+    const confirmResponse = await confirmClaim(context.app, {
+      claimId: prepared.claimId,
+    });
+
+    assert.equal(confirmResponse.statusCode, 200);
+    const rejectToken = hmacSha256Hex(BASE_CONFIG.adminReviewSecret, `${prepared.claimId}:reject`);
+    const reviewResponse = await context.app.inject({
+      method: "GET",
+      url: `/admin/review/${prepared.claimId}?action=reject&token=${rejectToken}`,
+    });
+
+    assert.equal(reviewResponse.statusCode, 200);
+    assert.match(reviewResponse.body, /Claim rejected/);
+    assert.match(reviewResponse.body, /REJECTED/);
+
+    const claim = await context.prisma.claim.findUnique({ where: { id: prepared.claimId } });
+    assert.ok(claim);
+    assert.equal(claim.status, "REJECTED");
   } finally {
     await context.cleanup();
   }

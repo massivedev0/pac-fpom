@@ -19,6 +19,7 @@ import { WALLET_CONNECT_TIMEOUT_MS } from "./constants.js";
  * @returns {{
  *   updateWalletStatusForClaimPanel: () => void;
  *   updateTopWalletButton: () => void;
+ *   setTopWalletButtonVisible: (visible: boolean) => void;
  *   closeWalletModal: () => void;
  *   openWalletModal: () => Promise<void>;
  *   connectWalletAddress: (preferredWalletId?: string) => Promise<{status: "connected" | "select_account"; address?: string}>;
@@ -95,6 +96,21 @@ export function createWalletUiController(options) {
     topWalletButton.classList.add("connected");
     topWalletButton.textContent = formatCompactAddress(connectedAddress);
     topWalletButton.title = `${rewardsState.walletProviderName || "Wallet"}: ${connectedAddress}`;
+  }
+
+  /**
+   * Shows or hides the top-right wallet button
+   *
+   * @param {boolean} visible Whether the button should be visible
+   */
+  function setTopWalletButtonVisible(visible) {
+    if (!topWalletButton) {
+      return;
+    }
+    topWalletButton.hidden = !visible;
+    if (!visible) {
+      closeWalletModal();
+    }
   }
 
   /**
@@ -345,6 +361,7 @@ export function createWalletUiController(options) {
   return {
     updateWalletStatusForClaimPanel,
     updateTopWalletButton,
+    setTopWalletButtonVisible,
     closeWalletModal,
     openWalletModal,
     connectWalletAddress,

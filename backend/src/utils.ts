@@ -4,6 +4,19 @@ export function sha256Hex(input: string): string {
   return crypto.createHash("sha256").update(input).digest("hex");
 }
 
+export function hmacSha256Hex(secret: string, input: string): string {
+  return crypto.createHmac("sha256", secret).update(input).digest("hex");
+}
+
+export function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(left, right);
+}
+
 export function randomToken(bytes = 24): string {
   return crypto.randomBytes(bytes).toString("base64url");
 }
