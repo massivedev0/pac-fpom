@@ -221,15 +221,16 @@ async function main() {
   const prisma = new PrismaClient();
 
   try {
-    const logs = await prisma.auditLog.findMany({
+    const latestLogs = await prisma.auditLog.findMany({
       where: {
         event: options.event,
         address: options.address,
         claimId: options.claimId,
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: options.limit,
     });
+    const logs = [...latestLogs].reverse();
 
     if (options.json) {
       console.log(JSON.stringify(logs, null, 2));

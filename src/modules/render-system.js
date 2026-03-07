@@ -297,7 +297,8 @@ function drawModeBanner(ctx, state, baseWidth, baseHeight) {
   ctx.fillStyle = "#2f1a15";
   ctx.font = '12px "Press Start 2P", monospace';
   ctx.fillText("No more scams. Gimme a serious fake.", x + 70, y + 112);
-  ctx.fillText("Move: WASD / Arrows  |  F: fullscreen  |  P: pause", x + 70, y + 148);
-  ctx.fillText("Collect memes. Eat red orb to hunt Doge, Shiba, Pepe.", x + 70, y + 176);
-  ctx.fillText("Press Enter / Space or click Start Hunt", x + 70, y + 218);
+  ctx.fillText("Move: WASD / Arrows  |  Power hunt: eat red orbs", x + 70, y + 148);
+  ctx.fillText("F: fullscreen  |  P: pause", x + 70, y + 176);
+  ctx.fillText("Collect memes. Eat red orb to hunt Doge, Shiba, Pepe.", x + 70, y + 204);
+  ctx.fillText("Press Enter / Space or click Start Hunt", x + 70, y + 236);
 }
