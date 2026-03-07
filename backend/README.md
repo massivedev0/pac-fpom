@@ -8,7 +8,7 @@ A simple backend for issuing FPOM rewards after a completed round
 - Prisma + SQLite
 - Server-side score recomputation
 - Limit of max 2 successful claims per address
-- Two verification modes: `wallet_signature` (default) and `address_only`
+- Two verification modes: `address_only` (default) and legacy `wallet_signature`
 - MVP anti-abuse checks for IP, fingerprint, and risk score
 - Risk score includes session telemetry density (`session_events`) to detect suspicious runs
 - X profile format validation (`https://x.com/account`) and limit of 2 paid claims per profile
@@ -53,6 +53,7 @@ Test run clears local tables in configured `DATABASE_URL` before each test.
 Current coverage includes:
 
 - Happy path claim and dry-run payout
+- Default claim flow without wallet signature prompt
 - Address limit of 2 successful claims
 - Signature requirement for `wallet_signature`
 - Rejection for non-winning run
@@ -93,5 +94,5 @@ Main ones:
 ## Next step
 
 - Real FPOM on-chain transfer instead of dry-run
-- Signature verification for `wallet_signature` via massa-web3
+- Optional signature verification for legacy `wallet_signature` via massa-web3
 - Frontend integration with rewards API

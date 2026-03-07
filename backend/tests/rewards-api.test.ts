@@ -207,6 +207,40 @@ test("public config should expose promo tweet url", async () => {
   }
 });
 
+test("claim prepare should default to address_only and confirm without signature", async () => {
+  const context = await createTestContext();
+
+  try {
+    const session = await startSession(context.app);
+
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      run: WINNING_RUN,
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as {
+      claimId: string;
+      requiresSignature: boolean;
+      verificationMode: string;
+    };
+    assert.equal(prepared.requiresSignature, false);
+    assert.equal(prepared.verificationMode, "address_only");
+
+    const confirmResponse = await confirmClaim(context.app, {
+      claimId: prepared.claimId,
+    });
+
+    assert.equal(confirmResponse.statusCode, 200);
+    const body = confirmResponse.json() as { status: string };
+    assert.equal(body.status, "PAID");
+  } finally {
+    await context.cleanup();
+  }
+});
+
 test("same address should not exceed two paid claims", async () => {
   const context = await createTestContext();
 

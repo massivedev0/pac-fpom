@@ -87,7 +87,7 @@ body {
   max-width: min(56vw, 320px);
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: center;
 }
 
 .top-wallet-btn.connected {

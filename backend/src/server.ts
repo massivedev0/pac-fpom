@@ -10,6 +10,7 @@ const VERIFICATION_MODES = {
   wallet_signature: "wallet_signature",
   address_only: "address_only",
 } as const;
+const DEFAULT_VERIFICATION_MODE = VERIFICATION_MODES.address_only;
 
 const CLAIM_STATUSES = {
   PREPARED: "PREPARED",
@@ -50,7 +51,7 @@ const claimPrepareSchema = z.object({
   xProfile: z.string().trim().min(10).max(200),
   verificationMode: z
     .enum([VERIFICATION_MODES.wallet_signature, VERIFICATION_MODES.address_only])
-    .default(VERIFICATION_MODES.wallet_signature),
+    .default(DEFAULT_VERIFICATION_MODE),
   run: runSummarySchema,
   fingerprint: z.string().trim().min(8).max(500).optional(),
 });

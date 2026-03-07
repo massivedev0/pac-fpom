@@ -34,7 +34,7 @@ export const SESSION_RETRY_DELAY_MS = 2500;
  * @readonly
  */
 export const WALLET_CONNECT_TIMEOUT_MS = 9000;
-export const CLAIM_VERIFICATION_MODE = "wallet_signature";
+export const CLAIM_VERIFICATION_MODE = "address_only";
 
 /**
  * Score values tuned for roughly 100k points per full clear run

@@ -19,7 +19,7 @@ import {
 import { apiGetJson, apiPostJson } from "./modules/http-client.js";
 import { renderScene } from "./modules/render-system.js";
 import { getFingerprint, isValidMassaAddress, normalizeXProfile } from "./modules/rewards-helpers.js";
-import { discoverWalletCandidates, getCandidateAccounts, signChallenge } from "./modules/wallet-service.js";
+import { discoverWalletCandidates, getCandidateAccounts } from "./modules/wallet-service.js";
 import { createWalletUiController } from "./modules/wallet-ui.js";
 
 const canvas = document.getElementById("game-canvas");
@@ -238,21 +238,6 @@ const walletUi = createWalletUiController({
   discoverWalletCandidates,
   getCandidateAccounts,
 });
-
-/**
- * Signs backend challenge using connected wallet account/provider
- *
- * @param {string} challenge Challenge text from backend
- * @returns {Promise<string>}
- */
-async function signWithWallet(challenge) {
-  return signChallenge({
-    walletAccount: STATE.rewards.walletAccount,
-    walletProvider: STATE.rewards.walletProvider,
-    connectedAddress: STATE.rewards.connectedAddress,
-    challenge,
-  });
-}
 
 /**
  * Rewards backend POST helper bound to configured API base URL
@@ -965,8 +950,10 @@ function eatPellets() {
     });
     if (!STATE.rewards.apiBase) {
       setClaimStatus("Rewards API is not configured for this host");
+    } else if (isValidMassaAddress(STATE.rewards.connectedAddress || "")) {
+      setClaimStatus("Add X profile and claim your FPOM");
     } else {
-      setClaimStatus("Enter your address and claim your FPOM");
+      setClaimStatus("Connect wallet, add X profile, and claim your FPOM");
     }
     showOverlay("FPOM Wins", "Play Again");
     playTone(840, 0.1, "sawtooth", 0.06);
@@ -1231,7 +1218,6 @@ async function submitRewardClaim() {
 
   const verificationMode = CLAIM_VERIFICATION_MODE;
   const claimAddress = STATE.rewards.connectedAddress || "";
-  let signature;
   if (!isValidMassaAddress(claimAddress)) {
     setClaimStatus("Connect wallet first to get a valid Massa address");
     return;
@@ -1266,16 +1252,9 @@ async function submitRewardClaim() {
       run: getRunSummary(),
     });
 
-    const needsSignature = Boolean(prepared.requiresSignature);
-    if (needsSignature) {
-      setClaimStatus("Requesting wallet signature...");
-      signature = await signWithWallet(prepared.challenge);
-    }
-
     setClaimStatus("Confirming claim...");
     const confirmed = await apiPost("/claim/confirm", {
       claimId: prepared.claimId,
-      signature: signature || undefined,
     });
 
     if (confirmed.status === "PAID") {
@@ -1441,7 +1420,7 @@ function init() {
   }
   window.render_game_to_text = renderGameToText;
   window.advanceTime = advanceTime;
-  window.__fpom_game = { state: STATE };
+  window.__fpom_game = { state: STATE, walletUi };
   render();
 
   if (animationFrame) {

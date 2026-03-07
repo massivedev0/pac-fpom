@@ -44,6 +44,26 @@ export function createWalletUiController(options) {
   } = dom;
 
   /**
+   * Shortens long wallet address with a centered ellipsis
+   *
+   * @param {string} address Full wallet address
+   * @param {number} [leading=8] Number of visible leading characters
+   * @param {number} [trailing=8] Number of visible trailing characters
+   * @returns {string} Compact address label
+   */
+  function formatCompactAddress(address, leading = 8, trailing = 8) {
+    const normalized = String(address || "").trim();
+    if (!normalized) {
+      return "";
+    }
+    const minLength = leading + trailing + 3;
+    if (normalized.length <= minLength) {
+      return normalized;
+    }
+    return `${normalized.slice(0, leading)}...${normalized.slice(-trailing)}`;
+  }
+
+  /**
    * Refreshes wallet status line based on connection state
    */
   function updateWalletStatusForClaimPanel() {
@@ -68,16 +88,13 @@ export function createWalletUiController(options) {
     if (!connectedAddress) {
       topWalletButton.classList.remove("connected");
       topWalletButton.textContent = "Connect Wallet";
+      topWalletButton.title = "Connect Wallet";
       return;
     }
 
-    const shortAddress =
-      connectedAddress.length > 18
-        ? `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-6)}`
-        : connectedAddress;
-
     topWalletButton.classList.add("connected");
-    topWalletButton.textContent = `${rewardsState.walletProviderName || "Wallet"}: ${shortAddress}`;
+    topWalletButton.textContent = formatCompactAddress(connectedAddress);
+    topWalletButton.title = `${rewardsState.walletProviderName || "Wallet"}: ${connectedAddress}`;
   }
 
   /**
