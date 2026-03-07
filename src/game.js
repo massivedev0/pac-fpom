@@ -15,6 +15,7 @@ import { isValidMassaAddress } from "./modules/rewards-helpers.js";
 import { discoverWalletCandidates, getCandidateAccounts } from "./modules/wallet-service.js";
 import { createWalletUiController } from "./modules/wallet-ui.js";
 import { createRewardsController } from "./modules/rewards-controller.js";
+import { createOverlayUiController } from "./modules/overlay-ui.js";
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
@@ -212,6 +213,22 @@ const rewardsController = createRewardsController({
 });
 
 /**
+ * Overlay/menu controller
+ */
+const overlayUi = createOverlayUiController({
+  menuOverlay,
+  startButton,
+  rewardPanel,
+  rewardSummary,
+  setTopWalletButtonVisible: (visible) => {
+    walletUi.setTopWalletButtonVisible(visible);
+  },
+  onRewardsShown: () => {
+    rewardsController.maybeSyncPromoTweetFromBackend();
+  },
+});
+
+/**
  * Forces win state for local debug flow
  */
 function triggerDebugVictory() {
@@ -239,7 +256,12 @@ function triggerDebugVictory() {
     durationMs: rewardsController.getRunElapsedMs(),
   });
   setClaimStatus("Debug victory enabled: submit reward claim");
-  showOverlay("FPOM Wins", "Play Again");
+  overlayUi.showOverlay({
+    mode: STATE.mode,
+    title: "FPOM Wins",
+    buttonLabel: "Play Again",
+    score: STATE.score,
+  });
 }
 
 // ------------------------------------------------------------
@@ -358,12 +380,8 @@ function startNewGame() {
     pelletsLeft: STATE.pelletsLeft,
   });
   setClaimStatus("");
-  if (rewardPanel) {
-    rewardPanel.hidden = true;
-  }
-  walletUi.setTopWalletButtonVisible(false);
   walletUi.closeWalletModal();
-  hideOverlay();
+  overlayUi.hideOverlay();
   ensureAudioContext();
   if (audioCtx?.state === "suspended") {
     audioCtx.resume().catch(() => {});
@@ -376,46 +394,6 @@ function startNewGame() {
  */
 function resetRound() {
   resetEntities();
-}
-
-/**
- * Hides menu overlay element
- */
-function hideOverlay() {
-  menuOverlay.style.display = "none";
-}
-
-/**
- * Shows menu overlay and updates title and button text
- */
-function showOverlay(text, buttonLabel) {
-  menuOverlay.style.display = "grid";
-  const title = menuOverlay.querySelector("h1");
-  const subtitle = menuOverlay.querySelector(".subtitle");
-  const hint = menuOverlay.querySelector(".hint");
-  const showRewards = STATE.mode === "won";
-  title.textContent = text;
-  subtitle.textContent =
-    STATE.mode === "won"
-      ? "Delusion-fueled momentum complete. Press start for another run."
-      : "FPOM got rugged by memes. Press start to run it back.";
-  subtitle.hidden = showRewards;
-  if (hint) {
-    hint.hidden = showRewards;
-  }
-  startButton.textContent = buttonLabel;
-
-  if (rewardPanel) {
-    rewardPanel.hidden = !showRewards;
-    if (showRewards && rewardSummary) {
-      rewardSummary.textContent = `Round reward: ${STATE.score.toLocaleString("en-US")} FPOM`;
-    }
-  }
-
-  walletUi.setTopWalletButtonVisible(true);
-  if (showRewards) {
-    rewardsController.maybeSyncPromoTweetFromBackend();
-  }
 }
 
 // ------------------------------------------------------------
@@ -736,7 +714,12 @@ function eatPellets() {
     } else {
       setClaimStatus("Connect wallet, add X profile, and claim your FPOM");
     }
-    showOverlay("FPOM Wins", "Play Again");
+    overlayUi.showOverlay({
+      mode: STATE.mode,
+      title: "FPOM Wins",
+      buttonLabel: "Play Again",
+      score: STATE.score,
+    });
     playTone(840, 0.1, "sawtooth", 0.06);
     playTone(1040, 0.15, "triangle", 0.05);
   }
@@ -783,7 +766,12 @@ function handleEnemyCollisions() {
           finalScore: STATE.score,
           durationMs: rewardsController.getRunElapsedMs(),
         });
-        showOverlay("Game Over", "Try Again");
+        overlayUi.showOverlay({
+          mode: STATE.mode,
+          title: "Game Over",
+          buttonLabel: "Try Again",
+          score: STATE.score,
+        });
       } else {
         STATE.roundResetTimer = 0.95;
       }
