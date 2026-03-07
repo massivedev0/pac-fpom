@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { type AppConfig } from "../src/config.js";
+import { type PayoutSender } from "../src/massa-payout.js";
 import { createApp } from "../src/server.js";
 import { hmacSha256Hex } from "../src/utils.js";
 
@@ -10,6 +11,11 @@ const BASE_CONFIG: AppConfig = {
   port: 0,
   corsAllowedOrigins: ["http://localhost:4177"],
   fpomContractAddress: "AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+  massaRewardWalletPk: "",
+  massaRpcUrl: "",
+  massaOperationWait: "final",
+  massaOperationTimeoutMs: 90_000,
+  massaOperationPollIntervalMs: 1_500,
   xPromoTweet: "https://x.com/massalabs",
   payoutDryRun: true,
   maxSinglePayoutAmount: 300_000,
@@ -52,7 +58,10 @@ async function clearDatabase(prisma: PrismaClient) {
   await prisma.session.deleteMany();
 }
 
-async function createTestContext(configPatch: Partial<AppConfig> = {}): Promise<TestContext> {
+async function createTestContext(
+  configPatch: Partial<AppConfig> = {},
+  payoutSender: PayoutSender | null = null,
+): Promise<TestContext> {
   const prisma = new PrismaClient();
   await clearDatabase(prisma);
 
@@ -62,6 +71,7 @@ async function createTestContext(configPatch: Partial<AppConfig> = {}): Promise<
       ...configPatch,
     },
     prisma,
+    payoutSender,
   });
 
   await app.ready();
@@ -536,6 +546,166 @@ test("same x profile should not exceed two paid claims", async () => {
     const body = prepareResponse.json() as { error: string; limitType: string };
     assert.equal(body.error, "limit_reached");
     assert.equal(body.limitType, "x_profile");
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("real payout sender should mark claim paid with on-chain tx hash", async () => {
+  const payoutSender: PayoutSender = {
+    isConfigured: () => true,
+    async sendTokenPayout() {
+      return {
+        outcome: "paid",
+        txHash: "op_paid_123",
+        rawAmount: "106050000000000000000000",
+        tokenDecimals: 18,
+        observedStatus: "Success",
+      };
+    },
+    async reconcilePayout(txHash) {
+      return {
+        outcome: "paid",
+        txHash,
+        observedStatus: "Success",
+      };
+    },
+  };
+  const context = await createTestContext({ payoutDryRun: false }, payoutSender);
+
+  try {
+    const claimId = await createPaidClaim(context.app);
+    const claim = await context.prisma.claim.findUnique({ where: { id: claimId } });
+    assert.ok(claim);
+    assert.equal(claim.status, "PAID");
+    assert.equal(claim.txHash, "op_paid_123");
+
+    const payoutJob = await context.prisma.payoutJob.findUnique({ where: { claimId } });
+    assert.ok(payoutJob);
+    assert.equal(payoutJob.status, "PAID");
+
+    const logs = await context.prisma.auditLog.findMany({
+      where: { claimId },
+      orderBy: { createdAt: "asc" },
+      select: { event: true },
+    });
+    assert.ok(logs.some((entry) => entry.event === "PAYOUT_PAID_ONCHAIN"));
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("real payout sender should keep claim confirmed until reconciliation succeeds", async () => {
+  let reconcileCalls = 0;
+  const payoutSender: PayoutSender = {
+    isConfigured: () => true,
+    async sendTokenPayout() {
+      return {
+        outcome: "pending",
+        txHash: "op_pending_123",
+        rawAmount: "106050000000000000000000",
+        tokenDecimals: 18,
+        observedStatus: "PendingInclusion",
+      };
+    },
+    async reconcilePayout(txHash) {
+      reconcileCalls += 1;
+      return {
+        outcome: "paid",
+        txHash,
+        observedStatus: "Success",
+      };
+    },
+  };
+  const context = await createTestContext({ payoutDryRun: false }, payoutSender);
+
+  try {
+    const session = await startSession(context.app);
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      run: WINNING_RUN,
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string };
+
+    const confirmResponse = await confirmClaim(context.app, {
+      claimId: prepared.claimId,
+    });
+
+    assert.equal(confirmResponse.statusCode, 200);
+    const confirmBody = confirmResponse.json() as { status: string; txHash: string };
+    assert.equal(confirmBody.status, "CONFIRMED");
+    assert.equal(confirmBody.txHash, "op_pending_123");
+
+    const claimAfterConfirm = await context.prisma.claim.findUnique({ where: { id: prepared.claimId } });
+    assert.ok(claimAfterConfirm);
+    assert.equal(claimAfterConfirm.status, "CONFIRMED");
+
+    const claimPollResponse = await context.app.inject({
+      method: "GET",
+      url: `/claim/${prepared.claimId}`,
+    });
+
+    assert.equal(claimPollResponse.statusCode, 200);
+    const claimPollBody = claimPollResponse.json() as { status: string; txHash: string };
+    assert.equal(claimPollBody.status, "PAID");
+    assert.equal(claimPollBody.txHash, "op_pending_123");
+    assert.equal(reconcileCalls, 1);
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("real payout sender failure should move claim to manual review", async () => {
+  const payoutSender: PayoutSender = {
+    isConfigured: () => true,
+    async sendTokenPayout() {
+      return {
+        outcome: "failed",
+        txHash: "op_failed_123",
+        rawAmount: "106050000000000000000000",
+        tokenDecimals: 18,
+        observedStatus: "Error",
+        error: "operation_failed:Error",
+      };
+    },
+    async reconcilePayout(txHash) {
+      return {
+        outcome: "failed",
+        txHash,
+        observedStatus: "Error",
+        error: "operation_failed:Error",
+      };
+    },
+  };
+  const context = await createTestContext({ payoutDryRun: false }, payoutSender);
+
+  try {
+    const session = await startSession(context.app);
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      run: WINNING_RUN,
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string };
+
+    const confirmResponse = await confirmClaim(context.app, {
+      claimId: prepared.claimId,
+    });
+
+    assert.equal(confirmResponse.statusCode, 200);
+    const body = confirmResponse.json() as { status: string; reason: string; txHash: string };
+    assert.equal(body.status, "MANUAL_REVIEW");
+    assert.match(body.reason, /onchain_payout_failed/);
+    assert.equal(body.txHash, "op_failed_123");
   } finally {
     await context.cleanup();
   }

@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { type AppConfig, getConfig } from "./config.js";
+import { createMassaPayoutSender, type PayoutSender } from "./massa-payout.js";
 import { computeServerScore, normalizeRunSummary } from "./scoring.js";
 import {
   extractIpFromRequest,
@@ -81,6 +82,7 @@ type AuditLogInput = {
 type CreateAppOptions = {
   config?: AppConfig;
   prisma?: PrismaClient;
+  payoutSender?: PayoutSender | null;
 };
 
 type PayoutContext = {
@@ -376,6 +378,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const config = options.config ?? getConfig();
   const prisma = options.prisma ?? new PrismaClient();
   const app = Fastify({ logger: createLoggerOptions(config) });
+  const payoutSender = options.payoutSender ?? createMassaPayoutSender(config, app.log);
   const writeAuditLog = createAuditWriter(prisma, app.log);
   const allowedOrigins = new Set(config.corsAllowedOrigins);
   const corsMethods = "GET,POST,OPTIONS";
@@ -653,6 +656,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   type ReviewInput = {
     claimId: string;
     signature?: string;
+    txHash?: string;
   };
 
   async function markAsManualReview(input: ReviewInput, reason: string) {
@@ -661,6 +665,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       data: {
         status: CLAIM_STATUSES.MANUAL_REVIEW,
         signature: input.signature,
+        txHash: input.txHash,
       },
     });
 
@@ -697,7 +702,186 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return {
       status: CLAIM_STATUSES.MANUAL_REVIEW,
       reason,
+      txHash: claim.txHash,
     };
+  }
+
+  async function markPayoutPaid(
+    claimId: string,
+    txHash: string,
+    extraPayload: Record<string, unknown>,
+    auditEvent: string,
+  ) {
+    const claim = await prisma.claim.findUnique({ where: { id: claimId } });
+    if (!claim) {
+      throw new Error("claim_not_found");
+    }
+
+    await prisma.$transaction([
+      prisma.payoutJob.update({
+        where: { claimId },
+        data: {
+          status: PAYOUT_STATUSES.PAID,
+          attempts: { increment: 1 },
+          lastError: null,
+        },
+      }),
+      prisma.claim.update({
+        where: { id: claimId },
+        data: {
+          status: CLAIM_STATUSES.PAID,
+          txHash,
+        },
+      }),
+    ]);
+
+    await writeAuditLog({
+      event: auditEvent,
+      claimId,
+      sessionId: claim.sessionId,
+      address: claim.address,
+      payload: {
+        txHash,
+        amount: claim.amount,
+        verificationMode: claim.verificationMode,
+        xProfile: claim.xProfile,
+        ...extraPayload,
+      },
+    });
+
+    return claim;
+  }
+
+  async function markPayoutSubmitted(
+    claimId: string,
+    txHash: string,
+    extraPayload: Record<string, unknown>,
+  ) {
+    const claim = await prisma.claim.findUnique({ where: { id: claimId } });
+    if (!claim) {
+      throw new Error("claim_not_found");
+    }
+
+    await prisma.$transaction([
+      prisma.payoutJob.update({
+        where: { claimId },
+        data: {
+          attempts: { increment: 1 },
+          lastError: null,
+        },
+      }),
+      prisma.claim.update({
+        where: { id: claimId },
+        data: {
+          status: CLAIM_STATUSES.CONFIRMED,
+          txHash,
+        },
+      }),
+    ]);
+
+    await writeAuditLog({
+      event: "PAYOUT_SUBMITTED_ONCHAIN",
+      claimId,
+      sessionId: claim.sessionId,
+      address: claim.address,
+      payload: {
+        txHash,
+        amount: claim.amount,
+        verificationMode: claim.verificationMode,
+        xProfile: claim.xProfile,
+        ...extraPayload,
+      },
+    });
+
+    return claim;
+  }
+
+  async function markPayoutFailed(
+    claimId: string,
+    errorMessage: string,
+    txHash?: string,
+    extraPayload?: Record<string, unknown>,
+  ) {
+    const claim = await prisma.claim.findUnique({ where: { id: claimId } });
+    if (!claim) {
+      throw new Error("claim_not_found");
+    }
+
+    await prisma.$transaction([
+      prisma.payoutJob.update({
+        where: { claimId },
+        data: {
+          status: PAYOUT_STATUSES.FAILED,
+          attempts: { increment: 1 },
+          lastError: errorMessage,
+        },
+      }),
+      prisma.claim.update({
+        where: { id: claimId },
+        data: {
+          txHash,
+        },
+      }),
+    ]);
+
+    await writeAuditLog({
+      level: "ERROR",
+      event: "PAYOUT_FAILED_ONCHAIN",
+      claimId,
+      sessionId: claim.sessionId,
+      address: claim.address,
+      payload: {
+        reason: errorMessage,
+        txHash,
+        amount: claim.amount,
+        verificationMode: claim.verificationMode,
+        xProfile: claim.xProfile,
+        ...(extraPayload ?? {}),
+      },
+    });
+
+    return markAsManualReview(
+      { claimId, txHash },
+      `onchain_payout_failed:${errorMessage}`,
+    );
+  }
+
+  async function reconcilePendingPayout(claimId: string) {
+    if (!payoutSender || config.payoutDryRun) {
+      return;
+    }
+
+    const claim = await prisma.claim.findUnique({
+      where: { id: claimId },
+      include: { payoutJob: true },
+    });
+    if (!claim || claim.status !== CLAIM_STATUSES.CONFIRMED || !claim.txHash) {
+      return;
+    }
+
+    const reconciliation = await payoutSender.reconcilePayout(claim.txHash);
+    if (reconciliation.outcome === "paid") {
+      await markPayoutPaid(
+        claim.id,
+        reconciliation.txHash,
+        {
+          observedStatus: reconciliation.observedStatus,
+        },
+        "PAYOUT_PAID_ONCHAIN_RECONCILED",
+      );
+      return;
+    }
+
+    if (reconciliation.outcome === "failed") {
+      await markPayoutFailed(
+        claim.id,
+        reconciliation.error,
+        reconciliation.txHash,
+        {
+          observedStatus: reconciliation.observedStatus,
+        },
+      );
+    }
   }
 
   async function enqueueAndProcessPayout(claimId: string, options: PayoutOptions = {}) {
@@ -756,37 +940,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
     if (config.payoutDryRun) {
       const txHash = `dryrun_${Date.now().toString(36)}_${claimId.slice(-6)}`;
-
-      await prisma.$transaction([
-        prisma.payoutJob.update({
-          where: { claimId },
-          data: {
-            status: PAYOUT_STATUSES.PAID,
-            attempts: { increment: 1 },
-            lastError: null,
-          },
-        }),
-        prisma.claim.update({
-          where: { id: claimId },
-          data: {
-            status: CLAIM_STATUSES.PAID,
-            txHash,
-          },
-        }),
-      ]);
-
-      await writeAuditLog({
-        event: "PAYOUT_PAID_DRY_RUN",
-        claimId,
-        sessionId: claim.sessionId,
-        address: claim.address,
-        payload: {
-          txHash,
-          amount: claim.amount,
-          verificationMode: claim.verificationMode,
-          xProfile: claim.xProfile,
-        },
-      });
+      await markPayoutPaid(claimId, txHash, {}, "PAYOUT_PAID_DRY_RUN");
 
       await sendSlackNotification(
         app,
@@ -811,31 +965,93 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       };
     }
 
-    await prisma.$transaction([
-      prisma.payoutJob.update({
-        where: { claimId },
-        data: {
-          status: PAYOUT_STATUSES.FAILED,
-          attempts: { increment: 1 },
-          lastError: "Real payout integration is not configured yet.",
+    if (!payoutSender?.isConfigured()) {
+      await writeAuditLog({
+        level: "ERROR",
+        event: "PAYOUT_FAILED_NOT_CONFIGURED",
+        claimId,
+        sessionId: claim.sessionId,
+        address: claim.address,
+        payload: {
+          reason: "real_payout_not_configured",
         },
-      }),
-    ]);
+      });
+      return markAsManualReview(
+        { claimId: claim.id },
+        "real_payout_not_configured",
+      );
+    }
 
-    await writeAuditLog({
-      level: "ERROR",
-      event: "PAYOUT_FAILED_NOT_CONFIGURED",
-      claimId,
-      sessionId: claim.sessionId,
-      address: claim.address,
-      payload: {
-        reason: "real_payout_not_configured",
-      },
-    });
-    return markAsManualReview(
-      { claimId: claim.id },
-      "real_payout_not_configured",
-    );
+    try {
+      const payoutResult = await payoutSender.sendTokenPayout({
+        claimId,
+        recipientAddress: claim.address,
+        amountTokens: claim.amount,
+      });
+
+      if (payoutResult.outcome === "paid") {
+        await markPayoutPaid(
+          claimId,
+          payoutResult.txHash,
+          {
+            observedStatus: payoutResult.observedStatus,
+            rawAmount: payoutResult.rawAmount,
+            tokenDecimals: payoutResult.tokenDecimals,
+          },
+          "PAYOUT_PAID_ONCHAIN",
+        );
+
+        await sendSlackNotification(
+          app,
+          config,
+          formatSlackPayoutMessage({
+            claimId: claim.id,
+            sessionId: claim.sessionId,
+            address: claim.address,
+            xProfile: safeXProfile(claim.xProfile),
+            amount: claim.amount,
+            verificationMode: claim.verificationMode,
+            riskScore: run?.riskScore ?? null,
+            txHash: payoutResult.txHash,
+            dryRun: false,
+          }),
+        );
+
+        return {
+          status: CLAIM_STATUSES.PAID,
+          txHash: payoutResult.txHash,
+          dryRun: false,
+        };
+      }
+
+      if (payoutResult.outcome === "pending") {
+        await markPayoutSubmitted(claimId, payoutResult.txHash, {
+          observedStatus: payoutResult.observedStatus,
+          rawAmount: payoutResult.rawAmount,
+          tokenDecimals: payoutResult.tokenDecimals,
+        });
+
+        return {
+          status: CLAIM_STATUSES.CONFIRMED,
+          txHash: payoutResult.txHash,
+          dryRun: false,
+        };
+      }
+
+      return markPayoutFailed(
+        claimId,
+        payoutResult.error,
+        payoutResult.txHash,
+        {
+          observedStatus: payoutResult.observedStatus,
+          rawAmount: payoutResult.rawAmount,
+          tokenDecimals: payoutResult.tokenDecimals,
+        },
+      );
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown_payout_error";
+      return markPayoutFailed(claimId, reason);
+    }
   }
 
   app.post("/claim/confirm", async (req, reply) => {
@@ -1192,6 +1408,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       return reply.code(400).send({ error: "invalid_claim_id" });
     }
 
+    try {
+      await reconcilePendingPayout(claimId);
+    } catch (error) {
+      app.log.warn({ err: error, claimId }, "Failed to reconcile pending payout");
+    }
+
     const claim = await prisma.claim.findUnique({
       where: { id: claimId },
       include: { payoutJob: true },
@@ -1236,6 +1458,9 @@ async function bootstrap() {
       maxClaimsPerAddress: config.maxClaimsPerAddress,
       maxClaimsPerXProfile: config.maxClaimsPerXProfile,
       fpomContractAddress: config.fpomContractAddress,
+      payoutSenderConfigured: Boolean(config.payoutDryRun || config.massaRewardWalletPk.trim()),
+      massaRpcUrl: config.massaRpcUrl || "mainnet_default",
+      massaOperationWait: config.massaOperationWait,
       xPromoTweet: config.xPromoTweet,
       slackWebhookConfigured: Boolean(config.slackWebhookUrl),
       adminReviewBaseUrl: config.adminReviewBaseUrl,

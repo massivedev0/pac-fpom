@@ -13,7 +13,7 @@ A simple backend for issuing FPOM rewards after a completed round
 - Risk score includes session telemetry density (`session_events`) to detect suspicious runs
 - X profile format validation (`https://x.com/account`) and limit of 2 paid claims per profile
 - In-process payout worker
-- `PAYOUT_DRY_RUN=true` by default (no real on-chain transfer)
+- `PAYOUT_DRY_RUN=true` by default, but real on-chain FPOM transfer is supported when disabled
 - Manual review guardrails for oversized payout and daily payout volume
 - Audit log table in DB for claim verification and payout events
 - Slack webhook notifications for payout and manual review events
@@ -54,6 +54,8 @@ Test run clears local tables in configured `DATABASE_URL` before each test.
 Current coverage includes:
 
 - Happy path claim and dry-run payout
+- Happy path claim and real payout path through mocked on-chain sender
+- Pending on-chain payout reconciliation through `GET /claim/:claimId`
 - Default claim flow without wallet signature prompt
 - Address limit of 2 successful claims
 - Signature requirement for `wallet_signature`
@@ -81,6 +83,13 @@ Main ones:
 - `DATABASE_URL`
 - `CORS_ALLOWED_ORIGINS`
 - `PAYOUT_DRY_RUN`
+- `MASSA_REWARD_WALLET_PK`
+- `MASSA_ACCOUNT_SECRET_KEY`
+- `MASSA_WALLET_PK`
+- `MASSA_RPC_URL`
+- `MASSA_OPERATION_WAIT`
+- `MASSA_OPERATION_TIMEOUT_MS`
+- `MASSA_OPERATION_POLL_INTERVAL_MS`
 - `MAX_SINGLE_PAYOUT_AMOUNT`
 - `MAX_PAYOUTS_PER_DAY`
 - `X_PROMO_TWEET`
@@ -89,13 +98,11 @@ Main ones:
 - `MAX_CLAIMS_PER_ADDRESS`
 - `MAX_CLAIMS_PER_X_PROFILE`
 - `IP_CLAIMS_PER_DAY_LIMIT`
-- `MASSA_REWARD_WALLET_PK`
 - `SLACK_WEBHOOK_URL`
 - `LOG_LEVEL`
 - `PRETTY_LOGS`
 
 ## Next step
 
-- Real FPOM on-chain transfer instead of dry-run
 - Optional signature verification for legacy `wallet_signature` via massa-web3
-- Frontend integration with rewards API
+- Background reconciliation worker instead of on-demand reconciliation during `GET /claim/:claimId`

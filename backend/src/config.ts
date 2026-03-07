@@ -3,6 +3,11 @@ export type AppConfig = {
   port: number;
   corsAllowedOrigins: string[];
   fpomContractAddress: string;
+  massaRewardWalletPk: string;
+  massaRpcUrl: string;
+  massaOperationWait: "final" | "speculative";
+  massaOperationTimeoutMs: number;
+  massaOperationPollIntervalMs: number;
   xPromoTweet: string;
   payoutDryRun: boolean;
   maxSinglePayoutAmount: number;
@@ -47,6 +52,13 @@ export function getConfig(env: EnvSource = process.env): AppConfig {
     "http://localhost:5173",
     "http://127.0.0.1:5173",
   ];
+  const massaOperationWait =
+    env.MASSA_OPERATION_WAIT === "speculative" ? "speculative" : "final";
+  const massaRewardWalletPk =
+    env.MASSA_REWARD_WALLET_PK ??
+    env.MASSA_ACCOUNT_SECRET_KEY ??
+    env.MASSA_WALLET_PK ??
+    "";
 
   return {
     host: env.HOST ?? "0.0.0.0",
@@ -55,6 +67,11 @@ export function getConfig(env: EnvSource = process.env): AppConfig {
     fpomContractAddress:
       env.FPOM_CONTRACT_ADDRESS ??
       "AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+    massaRewardWalletPk,
+    massaRpcUrl: env.MASSA_RPC_URL?.trim() ?? "",
+    massaOperationWait,
+    massaOperationTimeoutMs: asNumber(env.MASSA_OPERATION_TIMEOUT_MS, 90_000),
+    massaOperationPollIntervalMs: asNumber(env.MASSA_OPERATION_POLL_INTERVAL_MS, 1_500),
     xPromoTweet: env.X_PROMO_TWEET ?? "https://x.com/massalabs",
     payoutDryRun: String(env.PAYOUT_DRY_RUN ?? "true") !== "false",
     maxSinglePayoutAmount: asNumber(env.MAX_SINGLE_PAYOUT_AMOUNT, 300_000),

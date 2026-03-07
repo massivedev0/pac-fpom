@@ -485,6 +485,13 @@ export function createRewardsController(options) {
         return;
       }
 
+      if (confirmed.status === "CONFIRMED") {
+        const txHash = confirmed.txHash ? ` tx=${confirmed.txHash}` : "";
+        setClaimStatus(`Claim approved. Payout is being finalized...${txHash}`);
+        startClaimStatusPolling(prepared.claimId);
+        return;
+      }
+
       if (prepared?.claimId) {
         rewardsState.activeClaimId = prepared.claimId;
       }
