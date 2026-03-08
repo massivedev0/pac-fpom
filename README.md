@@ -1,6 +1,23 @@
-# pac-fpom
+# Pac-FPOM: Fake PEPE on Massa Meme Hunt game
 
 FPOM Meme Hunt is a lightweight Pac-Man-style browser game built for FPOM promotion.
+
+## Public Links
+
+- GitHub Pages: [massivedev0.github.io/pac-fpom](https://massivedev0.github.io/pac-fpom/)
+- Massa DeWeb native MNS: [pac-fpom.massa](http://pac-fpom.massa/)
+- Massa DeWeb mirror 1: [pac-fpom.deweb.half-red.net](https://pac-fpom.deweb.half-red.net)
+- Massa DeWeb mirror 2: [pac-fpom.deweb.node-master.fr](https://pac-fpom.deweb.node-master.fr)
+- Local DeWeb server variant: [pac-fpom.localhost:8080](http://pac-fpom.localhost:8080/)
+
+## FPOM Links
+
+- X: [PepeOnMassaFake](https://x.com/PepeOnMassaFake)
+- Trade on Duser-Pump: [duser-pump.netlify.app](https://duser-pump.netlify.app/trade/AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib)
+- EagleFi DEX: [eaglefi.io token page](https://www.eaglefi.io/token/AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib)
+- Dusa DEX: [app.dusa.io pool page](https://app.dusa.io/pools/AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib/AS12U4TZfNK7qoLyEERBBRDMu8nm5MKoRzPXDXans4v9wdATZedz9/100/V2)
+- X intro post: [June 2025 intro post](https://x.com/PepeOnMassaFake/status/1935283435217592782)
+- X summary post: [June 2025 summary post](https://x.com/PepeOnMassaFake/status/1935284341887684740)
 
 ## Project Layout
 
@@ -48,3 +65,12 @@ npm install
 npx prisma db push
 npm run dev
 ```
+
+## What Matters Before Production
+
+- Run the backend behind a reverse proxy and process manager on Ubuntu, not as a raw dev process
+- Keep `backend/.env` secrets only on the server and rotate payout keys if they were ever exposed locally
+- Back up the SQLite reward database regularly or move to PostgreSQL if traffic grows
+- Monitor Slack alerts, payout failures, low-balance warnings, and GitHub Actions deploy status
+- Rate-limit public reward endpoints at the edge if claim traffic starts to grow
+- Test the game on real iPhone and Android devices, especially orientation lock and touch controls

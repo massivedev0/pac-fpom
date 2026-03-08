@@ -314,6 +314,44 @@ body {
   line-height: 1.7;
 }
 
+.menu-links {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.menu-links[hidden] {
+  display: none !important;
+}
+
+.menu-links a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 118px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 2px solid rgba(123, 17, 0, 0.16);
+  font-family: "Bungee", sans-serif;
+  font-size: 16px;
+  line-height: 1;
+  text-decoration: none;
+  color: #70200e;
+  background: rgba(255, 250, 245, 0.9);
+  box-shadow: 0 3px 0 rgba(123, 17, 0, 0.14);
+}
+
+.menu-links a:hover,
+.menu-links a:focus-visible {
+  transform: translateY(-1px);
+  color: #521408;
+}
+
 .reward-panel {
   width: min(700px, 94vw);
   display: grid;
@@ -477,14 +515,56 @@ body.mobile-ui .mobile-pause-btn {
 }
 
 body.mobile-ui .menu-overlay {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "logo title"
+    "logo subtitle"
+    "button button"
+    "hint hint";
   padding: 16px 14px;
   gap: 12px;
   overflow-y: auto;
 }
 
+body.mobile-ui .menu-overlay > .overlay-logo {
+  grid-area: logo;
+  justify-self: start;
+  align-self: center;
+}
+
+body.mobile-ui .menu-overlay > h1 {
+  grid-area: title;
+  align-self: end;
+  text-align: left;
+}
+
+body.mobile-ui .menu-overlay > .subtitle {
+  grid-area: subtitle;
+  text-align: left;
+}
+
+body.mobile-ui .menu-overlay > #reward-panel,
+body.mobile-ui .menu-overlay > #start-btn,
+body.mobile-ui .menu-overlay > .hint {
+  grid-column: 1 / -1;
+}
+
+body.mobile-ui .menu-links {
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  gap: 6px;
+}
+
+body.mobile-ui .menu-links a {
+  min-width: 92px;
+  padding: 7px 10px;
+  font-size: 14px;
+}
+
 body.mobile-ui .overlay-logo {
-  width: clamp(72px, 18vw, 104px);
-  height: clamp(72px, 18vw, 104px);
+  width: clamp(60px, 14vw, 86px);
+  height: clamp(60px, 14vw, 86px);
 }
 
 body.mobile-ui .subtitle,
@@ -503,6 +583,8 @@ body.mobile-ui .menu-overlay[data-overlay-mode="won"] {
   justify-items: stretch;
   gap: 8px;
   padding: 12px 12px 14px;
+  grid-template-columns: 1fr;
+  grid-template-areas: none;
 }
 
 body.mobile-ui .menu-overlay[data-overlay-mode="won"] .overlay-logo {

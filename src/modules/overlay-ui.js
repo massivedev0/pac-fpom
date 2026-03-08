@@ -46,6 +46,7 @@ export function createOverlayUiController(options) {
     const titleNode = menuOverlay.querySelector("h1");
     const subtitleNode = menuOverlay.querySelector(".subtitle");
     const hintNode = menuOverlay.querySelector(".hint");
+    const linksNode = menuOverlay.querySelector(".menu-links");
 
     menuOverlay.style.display = "grid";
     menuOverlay.dataset.overlayMode = mode;
@@ -62,6 +63,9 @@ export function createOverlayUiController(options) {
 
     if (hintNode) {
       hintNode.hidden = showRewards;
+    }
+    if (linksNode) {
+      linksNode.hidden = showRewards;
     }
 
     startButton.textContent = buttonLabel;
