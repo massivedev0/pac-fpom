@@ -125,6 +125,7 @@ const STATE = {
     walletModalInFlight: false,
     activeClaimId: null,
     lastClaimTxHash: "",
+    claimLocked: false,
   },
 };
 
@@ -228,14 +229,26 @@ function setClaimStatus(text) {
 
 /**
  * Enables or disables reward claim controls
+ *
+ * @param {boolean} disabled True while claim request is in flight
  */
 function setClaimControlsDisabled(disabled) {
   if (claimButton) {
-    claimButton.disabled = disabled;
+    claimButton.disabled = disabled || STATE.rewards.claimLocked;
   }
   if (xProfileInput) {
     xProfileInput.disabled = disabled;
   }
+}
+
+/**
+ * Locks or unlocks the claim button after payout flow has started
+ *
+ * @param {boolean} locked True to keep Claim FPOM disabled
+ */
+function setClaimSubmissionLocked(locked) {
+  STATE.rewards.claimLocked = locked;
+  setClaimControlsDisabled(false);
 }
 
 /**
@@ -276,6 +289,7 @@ const rewardsController = createRewardsController({
   setClaimStatus,
   setClaimStatusView,
   setClaimControlsDisabled,
+  setClaimSubmissionLocked,
   applyPromoTweetUrl,
   getScore: () => STATE.score,
   getMode: () => STATE.mode,

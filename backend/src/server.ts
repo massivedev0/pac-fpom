@@ -61,10 +61,14 @@ const runSummarySchema = z.object({
   finalScoreClient: z.number().int().nonnegative(),
 });
 
+const clientDeviceSchema = z.record(z.unknown());
+
 const claimPrepareSchema = z.object({
   sessionId: z.string().trim().min(8),
   address: z.string().trim().min(10),
   xProfile: z.string().trim().min(10).max(200),
+  clientWallet: z.string().trim().min(2).max(120).optional(),
+  clientDevice: clientDeviceSchema.optional(),
   verificationMode: z
     .enum([VERIFICATION_MODES.wallet_signature, VERIFICATION_MODES.address_only])
     .default(DEFAULT_VERIFICATION_MODE),
@@ -99,6 +103,8 @@ type PayoutContext = {
   sessionId: string;
   address: string;
   xProfile: string;
+  clientWallet?: string | null;
+  clientDevice?: string | null;
   amount: number;
   verificationMode: string;
   riskScore?: number | null;
@@ -142,6 +148,54 @@ function normalizeXProfileUrl(input: string): string | null {
  */
 function safeXProfile(value: string | null | undefined): string {
   return value ?? "https://x.com/unknown";
+}
+
+/**
+ * Returns safe wallet-provider label for logs and Slack notifications
+ *
+ * @param {string | null | undefined} value Stored wallet label
+ * @returns {string} Existing wallet label or placeholder
+ */
+function safeClientWallet(value: string | null | undefined): string {
+  const normalized = String(value ?? "").trim();
+  return normalized || "unknown";
+}
+
+/**
+ * Serializes client device metadata into JSON for persistence
+ *
+ * @param {Record<string, unknown> | undefined} value Parsed device payload
+ * @returns {string | null} Serialized JSON or null when unavailable
+ */
+function serializeClientDevice(value: Record<string, unknown> | undefined): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Formats persisted client device metadata for Slack notifications
+ *
+ * @param {string | null | undefined} value Stored client device JSON
+ * @returns {string} Compact device description
+ */
+function formatSlackClientDevice(value: string | null | undefined): string {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return "unknown";
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(normalized));
+  } catch {
+    return normalized;
+  }
 }
 
 /**
@@ -543,6 +597,8 @@ function formatSlackPayoutMessage(config: AppConfig, context: PayoutContext): st
     `Session ID: ${context.sessionId}`,
     `Address: ${context.address}`,
     `X profile: ${context.xProfile}`,
+    `Client wallet: ${safeClientWallet(context.clientWallet)}`,
+    `Client device: ${formatSlackClientDevice(context.clientDevice)}`,
     `Amount: ${context.amount.toLocaleString("en-US")} FPOM`,
     `Verification: ${context.verificationMode}`,
     context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
@@ -622,6 +678,8 @@ function formatSlackManualReviewMessage(config: AppConfig, context: PayoutContex
     `Session ID: ${context.sessionId}`,
     `Address: ${context.address}`,
     `X profile: ${context.xProfile}`,
+    `Client wallet: ${safeClientWallet(context.clientWallet)}`,
+    `Client device: ${formatSlackClientDevice(context.clientDevice)}`,
     `Amount: ${context.amount.toLocaleString("en-US")} FPOM`,
     `Verification: ${context.verificationMode}`,
     context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
@@ -1011,6 +1069,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         sessionId,
         address,
         xProfile: normalizedXProfile,
+        clientWallet: parsed.data.clientWallet?.trim() || null,
+        clientDevice: serializeClientDevice(parsed.data.clientDevice),
         verificationMode,
         amount: scoreServer,
         challenge,
@@ -1029,6 +1089,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         verificationMode,
         amount: scoreServer,
         xProfile: normalizedXProfile,
+        clientWallet: parsed.data.clientWallet?.trim() || null,
       },
     });
 
@@ -1215,6 +1276,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         sessionId: claim.sessionId,
         address: claim.address,
         xProfile: safeXProfile(claim.xProfile),
+        clientWallet: claim.clientWallet,
+        clientDevice: claim.clientDevice,
         amount: claim.amount,
         verificationMode: claim.verificationMode,
         riskScore: run?.riskScore ?? null,
@@ -1450,6 +1513,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         sessionId: claim.sessionId,
         address: claim.address,
         xProfile: safeXProfile(claim.xProfile),
+        clientWallet: claim.clientWallet,
+        clientDevice: claim.clientDevice,
         amount: claim.amount,
         verificationMode: claim.verificationMode,
         riskScore: run?.riskScore ?? null,
@@ -1631,6 +1696,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           sessionId: claim.sessionId,
           address: claim.address,
           xProfile: safeXProfile(claim.xProfile),
+          clientWallet: claim.clientWallet,
+          clientDevice: claim.clientDevice,
           amount: claim.amount,
           verificationMode: claim.verificationMode,
           riskScore: run?.riskScore ?? null,

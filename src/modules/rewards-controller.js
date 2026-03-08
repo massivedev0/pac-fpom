@@ -8,7 +8,12 @@ import {
   SESSION_RETRY_DELAY_MS,
 } from "./constants.js";
 import { apiGetJson, apiPostJson } from "./http-client.js";
-import { getFingerprint, isValidMassaAddress, normalizeXProfile } from "./rewards-helpers.js";
+import {
+  getClientDeviceInfo,
+  getFingerprint,
+  isValidMassaAddress,
+  normalizeXProfile,
+} from "./rewards-helpers.js";
 
 const CLAIM_STATUS_POLL_INTERVAL_MS = 5000;
 
@@ -21,6 +26,7 @@ const CLAIM_STATUS_POLL_INTERVAL_MS = 5000;
  * @param {(text: string) => void} options.setClaimStatus Claim status UI updater
  * @param {(input: { text: string; txExplorerUrl?: string; txHash?: string }) => void} options.setClaimStatusView Rich claim status UI updater
  * @param {(disabled: boolean) => void} options.setClaimControlsDisabled Claim control state updater
+ * @param {(locked: boolean) => void} options.setClaimSubmissionLocked Claim button lock updater
  * @param {(url: string) => void} options.applyPromoTweetUrl Promo tweet link updater
  * @param {() => number} options.getScore Current score getter
  * @param {() => string} options.getMode Current mode getter
@@ -51,6 +57,7 @@ export function createRewardsController(options) {
     setClaimStatus,
     setClaimStatusView,
     setClaimControlsDisabled,
+    setClaimSubmissionLocked,
     applyPromoTweetUrl,
     getScore,
     getMode,
@@ -463,6 +470,7 @@ export function createRewardsController(options) {
     rewardsState.eventFlushInFlight = false;
     rewardsState.claimInFlight = false;
     rewardsState.lastClaimTxHash = "";
+    setClaimSubmissionLocked(false);
   }
 
   /**
@@ -523,6 +531,8 @@ export function createRewardsController(options) {
         xProfile: normalizedXProfile,
         verificationMode: CLAIM_VERIFICATION_MODE,
         fingerprint: getFingerprint(),
+        clientWallet: String(rewardsState.walletProviderName || "").trim(),
+        clientDevice: getClientDeviceInfo(),
         run: getRunSummary(),
       });
 
@@ -532,29 +542,34 @@ export function createRewardsController(options) {
       });
 
       if (confirmed.status === "PAID") {
+        setClaimSubmissionLocked(true);
         setClaimStatusView(formatClaimStatusMessage(confirmed));
         stopClaimStatusPolling();
         return;
       }
 
       if (confirmed.status === "MANUAL_REVIEW") {
+        setClaimSubmissionLocked(true);
         setClaimStatus("Claim is in manual review. Waiting for admin decision...");
         startClaimStatusPolling(prepared.claimId);
         return;
       }
 
       if (confirmed.status === "CONFIRMED") {
+        setClaimSubmissionLocked(true);
         setClaimStatusView(formatClaimStatusMessage(confirmed));
         startClaimStatusPolling(prepared.claimId);
         return;
       }
 
       if (prepared?.claimId) {
+        setClaimSubmissionLocked(true);
         rewardsState.activeClaimId = prepared.claimId;
       }
       setClaimStatus(`Claim status: ${String(confirmed.status || "unknown")}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "claim_failed";
+      setClaimSubmissionLocked(false);
       setClaimStatus(`Claim failed: ${message}`);
     } finally {
       rewardsState.claimInFlight = false;

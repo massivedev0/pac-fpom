@@ -23,6 +23,7 @@ const BASE_CONFIG: AppConfig = {
   massaOperationWait: "final",
   massaOperationTimeoutMs: 90_000,
   massaOperationPollIntervalMs: 1_500,
+  massaExplorerTxUrlTemplate: "",
   xPromoTweet: "https://x.com/massalabs",
   payoutDryRun: true,
   maxSinglePayoutAmount: 300_000,
@@ -49,6 +50,19 @@ const WINNING_RUN = {
   powerPelletsEaten: 5,
   enemiesEaten: 2,
   finalScoreClient: 106_050,
+};
+
+const TEST_CLIENT_DEVICE = {
+  userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) Chrome/136.0.0.0",
+  language: "en-US",
+  languages: ["en-US", "ru-RU"],
+  platform: "MacIntel",
+  timezone: "Europe/Moscow",
+  screen: {
+    width: 1512,
+    height: 982,
+    devicePixelRatio: 2,
+  },
 };
 
 type TestContext = {
@@ -336,6 +350,123 @@ test("claim prepare should default to address_only and confirm without signature
     const body = confirmResponse.json() as { status: string };
     assert.equal(body.status, "PAID");
   } finally {
+    await context.cleanup();
+  }
+});
+
+test("claim prepare should persist client wallet and device metadata", async () => {
+  const context = await createTestContext();
+
+  try {
+    const session = await startSession(context.app);
+
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      clientWallet: "Bearby",
+      clientDevice: TEST_CLIENT_DEVICE,
+      run: WINNING_RUN,
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string };
+    const claim = await context.prisma.claim.findUnique({ where: { id: prepared.claimId } });
+
+    assert.ok(claim);
+    assert.equal(claim.clientWallet, "Bearby");
+    assert.deepEqual(JSON.parse(claim.clientDevice ?? "{}"), TEST_CLIENT_DEVICE);
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("Slack payout notification should include client wallet and device metadata", async () => {
+  const originalFetch = globalThis.fetch;
+  const slackRequests: string[] = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    slackRequests.push(String(init?.body || ""));
+    return new Response("", { status: 200 });
+  }) as typeof fetch;
+
+  const context = await createTestContext({
+    payoutDryRun: true,
+    slackWebhookUrl: "https://hooks.slack.test/services/fpom",
+  });
+
+  try {
+    const session = await startSession(context.app);
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      clientWallet: "Massa Station",
+      clientDevice: TEST_CLIENT_DEVICE,
+      run: WINNING_RUN,
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string };
+
+    const confirmResponse = await confirmClaim(context.app, {
+      claimId: prepared.claimId,
+    });
+
+    assert.equal(confirmResponse.statusCode, 200);
+    assert.equal(slackRequests.length, 1);
+    assert.match(slackRequests[0], /Client wallet: Massa Station/);
+    assert.match(slackRequests[0], /Client device:/);
+    assert.match(slackRequests[0], /MacIntel/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await context.cleanup();
+  }
+});
+
+test("Slack manual review notification should include client wallet and device metadata", async () => {
+  const originalFetch = globalThis.fetch;
+  const slackRequests: string[] = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    slackRequests.push(String(init?.body || ""));
+    return new Response("", { status: 200 });
+  }) as typeof fetch;
+
+  const context = await createTestContext({
+    payoutDryRun: true,
+    slackWebhookUrl: "https://hooks.slack.test/services/fpom",
+    maxSinglePayoutAmount: 100_000,
+  });
+
+  try {
+    const session = await startSession(context.app);
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      clientWallet: "Bearby",
+      clientDevice: TEST_CLIENT_DEVICE,
+      run: WINNING_RUN,
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string };
+
+    const confirmResponse = await confirmClaim(context.app, {
+      claimId: prepared.claimId,
+    });
+
+    assert.equal(confirmResponse.statusCode, 200);
+    const body = confirmResponse.json() as { status: string };
+    assert.equal(body.status, "MANUAL_REVIEW");
+    assert.equal(slackRequests.length, 1);
+    assert.match(slackRequests[0], /FPOM manual review requested/);
+    assert.match(slackRequests[0], /Client wallet: Bearby/);
+    assert.match(slackRequests[0], /MacIntel/);
+  } finally {
+    globalThis.fetch = originalFetch;
     await context.cleanup();
   }
 });

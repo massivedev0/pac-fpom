@@ -42,6 +42,55 @@ export function getFingerprint() {
 }
 
 /**
+ * Collects browser, OS, and device hints for backend risk logs and Slack notifications
+ *
+ * @returns {Record<string, unknown>} Structured client device snapshot
+ */
+export function getClientDeviceInfo() {
+  const uaData = navigator.userAgentData
+    ? {
+        brands: Array.isArray(navigator.userAgentData.brands)
+          ? navigator.userAgentData.brands.map((brand) => ({
+              brand: String(brand.brand || ""),
+              version: String(brand.version || ""),
+            }))
+          : [],
+        mobile: Boolean(navigator.userAgentData.mobile),
+        platform: navigator.userAgentData.platform || "",
+      }
+    : null;
+
+  return {
+    userAgent: navigator.userAgent || "",
+    language: navigator.language || "",
+    languages: Array.isArray(navigator.languages)
+      ? navigator.languages.filter((value) => typeof value === "string" && value.trim())
+      : [],
+    platform: navigator.platform || "",
+    vendor: navigator.vendor || "",
+    product: navigator.product || "",
+    cookieEnabled: Boolean(navigator.cookieEnabled),
+    onLine: Boolean(navigator.onLine),
+    maxTouchPoints: Number(navigator.maxTouchPoints || 0),
+    hardwareConcurrency: Number(navigator.hardwareConcurrency || 0),
+    deviceMemoryGb: Number(navigator.deviceMemory || 0),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    screen: window.screen
+      ? {
+          width: Number(window.screen.width || 0),
+          height: Number(window.screen.height || 0),
+          availWidth: Number(window.screen.availWidth || 0),
+          availHeight: Number(window.screen.availHeight || 0),
+          colorDepth: Number(window.screen.colorDepth || 0),
+          pixelDepth: Number(window.screen.pixelDepth || 0),
+          devicePixelRatio: Number(window.devicePixelRatio || 1),
+        }
+      : null,
+    userAgentData: uaData,
+  };
+}
+
+/**
  * Persists a stable pseudo-install identifier in local storage
  *
  * @returns {string} Existing or newly generated install id

@@ -247,7 +247,7 @@ function drawEffects(ctx, state, images) {
 function drawHud(ctx, state, baseWidth, baseHeight) {
   ctx.fillStyle = "#fff7e0";
   ctx.font = '16px "Press Start 2P", monospace';
-  ctx.fillText(`Score ${state.score}`, 22, 28);
+  ctx.fillText(`Score ${state.score} FPOM`, 22, 28);
   ctx.fillText(`Lives ${state.lives}`, 22, 54);
 
   if (state.powerTimer > 0) {

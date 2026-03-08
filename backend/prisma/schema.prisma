@@ -58,6 +58,8 @@ model Claim {
   sessionId        String   @unique
   address          String
   xProfile         String?
+  clientWallet     String?
+  clientDevice     String?
   verificationMode String
   amount           Int
   challenge        String
