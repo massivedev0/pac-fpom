@@ -204,6 +204,34 @@ async function pushSessionEvents(
   assert.equal(body.accepted, count);
 }
 
+/**
+ * Pushes provided telemetry events into a test session
+ *
+ * @param {ReturnType<typeof createApp>} app Fastify app under test
+ * @param {string} sessionId Target session id
+ * @param {Array<Record<string, unknown>>} events Session events in seq order
+ * @returns {Promise<void>}
+ */
+async function pushCustomSessionEvents(
+  app: ReturnType<typeof createApp>,
+  sessionId: string,
+  events: Array<Record<string, unknown>>,
+) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/session/event",
+    payload: {
+      sessionId,
+      startSeq: 0,
+      events,
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json() as { accepted: number };
+  assert.equal(body.accepted, events.length);
+}
+
 let xProfileSequence = 0;
 
 /**
@@ -491,6 +519,53 @@ test("same address should not exceed two paid claims", async () => {
     assert.equal(thirdPrepare.statusCode, 409);
     const body = thirdPrepare.json() as { error: string };
     assert.equal(body.error, "limit_reached");
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("claim prepare should compute reward from telemetry combo bonuses", async () => {
+  const context = await createTestContext();
+
+  try {
+    const session = await startSession(context.app);
+    await pushCustomSessionEvents(context.app, session.sessionId, [
+      { type: "run_started", atMs: 0, score: 0, payload: { lives: 3, pelletsLeft: 67 } },
+      { type: "pellet_eaten", atMs: 8000, score: 24250, payload: { pellets: 65, powerPellets: 1, pelletsLeft: 20 } },
+      { type: "enemy_eaten", atMs: 8300, score: 27750, payload: { enemyType: "doge", combo: 1 } },
+      { type: "enemy_eaten", atMs: 8600, score: 32250, payload: { enemyType: "pepe", combo: 2 } },
+      { type: "pellet_eaten", atMs: 14000, score: 33750, payload: { pellets: 0, powerPellets: 1, pelletsLeft: 8 } },
+      { type: "enemy_eaten", atMs: 14300, score: 37250, payload: { enemyType: "doge", combo: 1 } },
+      { type: "enemy_eaten", atMs: 14600, score: 41750, payload: { enemyType: "pepe", combo: 2 } },
+      { type: "run_won", atMs: 64932, score: 53750, payload: { finalScore: 53750, durationMs: 64932 } },
+    ]);
+
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      run: {
+        won: true,
+        durationMs: 64_932,
+        pelletsEaten: 65,
+        powerPelletsEaten: 2,
+        enemiesEaten: 4,
+        finalScoreClient: 53_750,
+      },
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string; amount: number };
+    assert.equal(prepared.amount, 53_750);
+
+    const run = await context.prisma.claim
+      .findUnique({ where: { id: prepared.claimId } })
+      .then((claim) => (claim ? context.prisma.run.findUnique({ where: { sessionId: claim.sessionId } }) : null));
+
+    assert.ok(run);
+    assert.equal(run.finalScoreClient, 53_750);
+    assert.equal(run.finalScoreServer, 53_750);
   } finally {
     await context.cleanup();
   }

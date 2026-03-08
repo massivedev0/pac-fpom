@@ -8,7 +8,12 @@ import {
   type PayoutBalanceSnapshot,
   type PayoutSender,
 } from "./massa-payout.js";
-import { computeServerScore, normalizeRunSummary } from "./scoring.js";
+import {
+  computeServerScore,
+  computeTelemetryScore,
+  normalizeRunSummary,
+  type ScoringSessionEvent,
+} from "./scoring.js";
 import {
   extractIpFromRequest,
   hmacSha256Hex,
@@ -195,6 +200,24 @@ function formatSlackClientDevice(value: string | null | undefined): string {
     return JSON.stringify(JSON.parse(normalized));
   } catch {
     return normalized;
+  }
+}
+
+/**
+ * Parses persisted session-event payload into scoring-friendly shape
+ *
+ * @param {string} payload Stored session-event JSON string
+ * @returns {ScoringSessionEvent | null} Parsed event envelope or `null`
+ */
+function parseSessionEventPayload(payload: string): ScoringSessionEvent | null {
+  try {
+    const parsed = JSON.parse(payload) as ScoringSessionEvent;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
   }
 }
 
@@ -1037,7 +1060,17 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       return reply.code(400).send({ error: "round_not_won" });
     }
 
-    const scoreServer = computeServerScore(run);
+    const sessionEvents = await prisma.sessionEvent.findMany({
+      where: { sessionId },
+      orderBy: [{ seq: "asc" }],
+      select: { payload: true },
+    });
+    const parsedSessionEvents = sessionEvents
+      .map((event) => parseSessionEventPayload(event.payload))
+      .filter((event): event is ScoringSessionEvent => Boolean(event));
+    const telemetryScore = computeTelemetryScore(run, parsedSessionEvents);
+    const scoreServer = telemetryScore ?? computeServerScore(run);
+    const scoringSource = telemetryScore === null ? "summary_fallback" : "telemetry";
     const challenge = randomToken(32);
     const fpHash = parsed.data.fingerprint ? sha256Hex(parsed.data.fingerprint) : session.fpHash;
 
@@ -1090,6 +1123,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         amount: scoreServer,
         xProfile: normalizedXProfile,
         clientWallet: parsed.data.clientWallet?.trim() || null,
+        scoringSource,
+        sessionEventsCount: sessionEvents.length,
       },
     });
 
