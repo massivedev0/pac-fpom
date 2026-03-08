@@ -64,10 +64,7 @@ function mapOperationStatusLabel(status: OperationStatus): string {
   return OperationStatus[status] ?? `UNKNOWN_${status}`;
 }
 
-function isSuccessStatus(status: OperationStatus, waitMode: "final" | "speculative"): boolean {
-  if (waitMode === "speculative") {
-    return status === OperationStatus.SpeculativeSuccess || status === OperationStatus.Success;
-  }
+function isFinalSuccessStatus(status: OperationStatus): boolean {
   return status === OperationStatus.Success;
 }
 
@@ -165,7 +162,7 @@ export function createMassaPayoutSender(
       const observedStatus = await waitOperationStatus(txHash, provider);
       const observedStatusLabel = mapOperationStatusLabel(observedStatus);
 
-      if (isSuccessStatus(observedStatus, config.massaOperationWait)) {
+      if (isFinalSuccessStatus(observedStatus)) {
         return {
           outcome: "paid",
           txHash,
@@ -200,7 +197,7 @@ export function createMassaPayoutSender(
       const observedStatus = await waitOperationStatus(txHash, provider);
       const observedStatusLabel = mapOperationStatusLabel(observedStatus);
 
-      if (isSuccessStatus(observedStatus, "final")) {
+      if (isFinalSuccessStatus(observedStatus)) {
         return {
           outcome: "paid",
           txHash,

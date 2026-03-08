@@ -654,7 +654,7 @@ test("real payout sender should keep claim confirmed until reconciliation succee
     const claimPollBody = claimPollResponse.json() as { status: string; txHash: string };
     assert.equal(claimPollBody.status, "PAID");
     assert.equal(claimPollBody.txHash, "op_pending_123");
-    assert.equal(reconcileCalls, 1);
+    assert.ok(reconcileCalls >= 1);
   } finally {
     await context.cleanup();
   }

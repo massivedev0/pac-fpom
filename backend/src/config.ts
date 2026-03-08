@@ -53,7 +53,7 @@ export function getConfig(env: EnvSource = process.env): AppConfig {
     "http://127.0.0.1:5173",
   ];
   const massaOperationWait =
-    env.MASSA_OPERATION_WAIT === "speculative" ? "speculative" : "final";
+    env.MASSA_OPERATION_WAIT === "final" ? "final" : "speculative";
   const massaRewardWalletPk =
     env.MASSA_REWARD_WALLET_PK ??
     env.MASSA_ACCOUNT_SECRET_KEY ??

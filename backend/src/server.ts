@@ -716,6 +716,9 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     if (!claim) {
       throw new Error("claim_not_found");
     }
+    if (claim.status === CLAIM_STATUSES.PAID && claim.txHash === txHash) {
+      return claim;
+    }
 
     await prisma.$transaction([
       prisma.payoutJob.update({
@@ -760,6 +763,9 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     const claim = await prisma.claim.findUnique({ where: { id: claimId } });
     if (!claim) {
       throw new Error("claim_not_found");
+    }
+    if (claim.status === CLAIM_STATUSES.CONFIRMED && claim.txHash === txHash) {
+      return claim;
     }
 
     await prisma.$transaction([
@@ -844,6 +850,77 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       { claimId, txHash },
       `onchain_payout_failed:${errorMessage}`,
     );
+  }
+
+  async function notifyPayoutPaid(claimId: string, txHash: string, dryRun: boolean) {
+    const [claim, run] = await Promise.all([
+      prisma.claim.findUnique({ where: { id: claimId } }),
+      prisma.claim
+        .findUnique({ where: { id: claimId } })
+        .then((currentClaim) =>
+          currentClaim ? prisma.run.findUnique({ where: { sessionId: currentClaim.sessionId } }) : null,
+        ),
+    ]);
+    if (!claim) {
+      return;
+    }
+
+    await sendSlackNotification(
+      app,
+      config,
+      formatSlackPayoutMessage({
+        claimId: claim.id,
+        sessionId: claim.sessionId,
+        address: claim.address,
+        xProfile: safeXProfile(claim.xProfile),
+        amount: claim.amount,
+        verificationMode: claim.verificationMode,
+        riskScore: run?.riskScore ?? null,
+        txHash,
+        dryRun,
+      }),
+    );
+  }
+
+  function schedulePayoutFinalization(claimId: string, txHash: string) {
+    if (!payoutSender || config.payoutDryRun) {
+      return;
+    }
+
+    void payoutSender
+      .reconcilePayout(txHash)
+      .then(async (reconciliation) => {
+        if (reconciliation.outcome === "paid") {
+          await markPayoutPaid(
+            claimId,
+            reconciliation.txHash,
+            {
+              observedStatus: reconciliation.observedStatus,
+            },
+            "PAYOUT_PAID_ONCHAIN_RECONCILED",
+          );
+          await notifyPayoutPaid(claimId, reconciliation.txHash, false);
+          return;
+        }
+
+        if (reconciliation.outcome === "failed") {
+          await markPayoutFailed(
+            claimId,
+            reconciliation.error,
+            reconciliation.txHash,
+            {
+              observedStatus: reconciliation.observedStatus,
+            },
+          );
+        }
+      })
+      .catch(async (error) => {
+        const reason = error instanceof Error ? error.message : "reconcile_failed";
+        app.log.warn({ err: error, claimId, txHash }, "Background payout reconciliation failed");
+        await markPayoutFailed(claimId, reason, txHash, {
+          observedStatus: "RECONCILE_EXCEPTION",
+        }).catch(() => {});
+      });
   }
 
   async function reconcilePendingPayout(claimId: string) {
@@ -1000,22 +1077,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           },
           "PAYOUT_PAID_ONCHAIN",
         );
-
-        await sendSlackNotification(
-          app,
-          config,
-          formatSlackPayoutMessage({
-            claimId: claim.id,
-            sessionId: claim.sessionId,
-            address: claim.address,
-            xProfile: safeXProfile(claim.xProfile),
-            amount: claim.amount,
-            verificationMode: claim.verificationMode,
-            riskScore: run?.riskScore ?? null,
-            txHash: payoutResult.txHash,
-            dryRun: false,
-          }),
-        );
+        await notifyPayoutPaid(claimId, payoutResult.txHash, false);
 
         return {
           status: CLAIM_STATUSES.PAID,
@@ -1030,6 +1092,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           rawAmount: payoutResult.rawAmount,
           tokenDecimals: payoutResult.tokenDecimals,
         });
+        schedulePayoutFinalization(claimId, payoutResult.txHash);
 
         return {
           status: CLAIM_STATUSES.CONFIRMED,

@@ -21,7 +21,7 @@ export const FIXED_DT = 1 / 60;
  * Reward/claim client defaults
  * @readonly
  */
-export const REWARDS_API_TIMEOUT_MS = 11_000;
+export const REWARDS_API_TIMEOUT_MS = 30_000;
 export const DEFAULT_LOCAL_API = "http://127.0.0.1:8787";
 export const DEFAULT_DEBUG_WIN_SCORE = 106_050;
 export const DEFAULT_X_PROMO_TWEET = "https://x.com/massalabs";
