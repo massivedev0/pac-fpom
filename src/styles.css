@@ -13,6 +13,7 @@
 html,
 body {
   margin: 0;
+  width: 100%;
   min-height: 100%;
   font-family: "Press Start 2P", monospace;
   color: var(--ink);
@@ -26,16 +27,22 @@ body {
   display: grid;
   place-items: center;
   padding: 16px;
+  min-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .layout {
   width: 100%;
+  min-height: 100%;
   display: grid;
   place-items: center;
 }
 
 .game-shell {
   position: relative;
+  width: min(960px, 96vw);
+  max-width: 100%;
   border-radius: 18px;
   overflow: hidden;
   box-shadow: 0 14px 40px rgba(100, 30, 0, 0.32);
@@ -43,10 +50,11 @@ body {
 
 #game-canvas {
   display: block;
-  width: min(96vw, 960px);
+  width: 100%;
   height: auto;
   border: 4px solid rgba(255, 255, 255, 0.7);
   background: #1d1630;
+  touch-action: none;
 }
 
 .dev-win-btn {
@@ -64,6 +72,26 @@ body {
   background: linear-gradient(180deg, #1dcf74, #129453);
   box-shadow: 0 4px 0 #0c5f35;
   opacity: 0.95;
+}
+
+.mobile-pause-btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 4;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-family: "Bungee", sans-serif;
+  font-size: 15px;
+  color: #fff;
+  cursor: pointer;
+  background: linear-gradient(180deg, #ff8d3a, #d95416);
+  box-shadow: 0 4px 0 #8f3008;
+}
+
+.mobile-pause-btn[hidden] {
+  display: none !important;
 }
 
 .dev-win-btn:active {
@@ -103,6 +131,46 @@ body {
   place-items: center;
   background: rgba(8, 8, 18, 0.55);
   padding: 16px;
+}
+
+.mobile-rotate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 10, 30, 0.86);
+}
+
+.mobile-rotate-overlay[hidden] {
+  display: none !important;
+}
+
+.mobile-rotate-card {
+  width: min(360px, 92vw);
+  display: grid;
+  gap: 10px;
+  padding: 22px 18px;
+  border-radius: 18px;
+  border: 3px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 248, 234, 0.96);
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.32);
+}
+
+.mobile-rotate-card h2 {
+  margin: 0;
+  font-family: "Bungee", sans-serif;
+  font-size: clamp(24px, 6vw, 30px);
+  color: #7b1100;
+}
+
+.mobile-rotate-card p {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.7;
+  color: #34201b;
 }
 
 .wallet-modal[hidden] {
@@ -371,6 +439,121 @@ body {
 
 #start-btn:active {
   transform: translateY(2px);
+}
+
+body.mobile-ui {
+  padding:
+    max(6px, env(safe-area-inset-top))
+    max(6px, env(safe-area-inset-right))
+    max(6px, env(safe-area-inset-bottom))
+    max(6px, env(safe-area-inset-left));
+}
+
+body.mobile-ui .layout {
+  min-height: 100%;
+}
+
+body.mobile-ui .game-shell {
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(100, 30, 0, 0.24);
+}
+
+body.mobile-ui .top-wallet-btn {
+  top: 12px;
+  right: 12px;
+  font-size: 13px;
+  padding: 7px 11px;
+  max-width: min(62vw, 250px);
+}
+
+body.mobile-ui .dev-win-btn {
+  top: 50px;
+}
+
+body.mobile-ui .mobile-pause-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.mobile-ui .menu-overlay {
+  padding: 16px 14px;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+body.mobile-ui .overlay-logo {
+  width: clamp(72px, 18vw, 104px);
+  height: clamp(72px, 18vw, 104px);
+}
+
+body.mobile-ui .subtitle,
+body.mobile-ui .hint {
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+body.mobile-ui .reward-panel {
+  width: min(92vw, 700px);
+  padding: 12px;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] {
+  align-content: start;
+  justify-items: stretch;
+  gap: 8px;
+  padding: 12px 12px 14px;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .overlay-logo {
+  display: none;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] h1 {
+  font-size: clamp(24px, 5vw, 32px);
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] #start-btn {
+  justify-self: center;
+  width: min(100%, 320px);
+  padding: 11px 20px;
+  font-size: 18px;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .reward-panel {
+  width: 100%;
+  max-width: none;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .reward-summary,
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .wallet-status,
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .reward-label,
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .claim-status {
+  font-size: 9px;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .reward-note,
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .reward-input {
+  font-size: 8px;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .claim-btn {
+  font-size: 16px;
+  padding: 9px 14px;
+}
+
+body.mobile-ui .wallet-modal {
+  padding: 12px;
+}
+
+body.mobile-ui .wallet-modal-card {
+  width: min(560px, 92vw);
+}
+
+body.mobile-portrait .game-shell {
+  filter: blur(2px);
+  opacity: 0.18;
+  pointer-events: none;
 }
 
 @media (max-width: 720px) {

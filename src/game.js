@@ -16,9 +16,12 @@ import { discoverWalletCandidates, getCandidateAccounts, resetWalletCandidate } 
 import { createWalletUiController } from "./modules/wallet-ui.js";
 import { createRewardsController } from "./modules/rewards-controller.js";
 import { createOverlayUiController } from "./modules/overlay-ui.js";
+import { createMobileRuntimeController } from "./modules/mobile-runtime.js";
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
+const gameShell = document.getElementById("game-shell");
+const mobilePauseButton = document.getElementById("mobile-pause-btn");
 const startButton = document.getElementById("start-btn");
 const menuOverlay = document.getElementById("menu-overlay");
 const topWalletButton = document.getElementById("top-wallet-btn");
@@ -34,6 +37,7 @@ const walletStatus = document.getElementById("wallet-status");
 const claimButton = document.getElementById("claim-btn");
 const claimStatus = document.getElementById("claim-status");
 const devWinButton = document.getElementById("dev-win-btn");
+const mobileRotateOverlay = document.getElementById("mobile-rotate-overlay");
 
 /**
  * Checks whether current host is local-only
@@ -102,6 +106,15 @@ const STATE = {
     pelletsEaten: 0,
     powerPelletsEaten: 0,
     enemiesEaten: 0,
+  },
+  runtime: {
+    isMobile: false,
+    isLandscape: true,
+    rotateNoticeVisible: false,
+    controlsHintHtml: "Move: WASD / Arrows · Power hunt: eat red orbs<br />F: fullscreen · P: pause",
+    controlsBannerPrimary: "Move: WASD / Arrows  |  Power hunt: eat red orbs",
+    controlsBannerSecondary: "F: fullscreen  |  P: pause",
+    controlsBannerStart: "Press Enter / Space or click Start Hunt",
   },
   rewards: {
     apiBase: "",
@@ -172,6 +185,51 @@ function applyPromoTweetUrl(url) {
     promoTweetLink.href = normalized;
     promoTweetLink.textContent = normalized;
   }
+}
+
+/**
+ * Syncs menu hint copy with current runtime mode
+ */
+function syncControlsHint() {
+  const hintNode = menuOverlay?.querySelector(".hint");
+  if (!hintNode) {
+    return;
+  }
+  hintNode.innerHTML = STATE.runtime.controlsHintHtml;
+}
+
+/**
+ * Updates mobile-only pause button visibility and label
+ */
+function syncMobilePauseButton() {
+  if (!mobilePauseButton) {
+    return;
+  }
+
+  const visible = STATE.runtime.isMobile && STATE.mode === "playing" && !STATE.runtime.rotateNoticeVisible;
+  mobilePauseButton.hidden = !visible;
+  mobilePauseButton.textContent = STATE.paused ? "Resume" : "Pause";
+}
+
+/**
+ * Converts current player world position into client-space reference point for tap controls
+ *
+ * @returns {{ x: number; y: number } | null} Player position in client coordinates
+ */
+function getPlayerClientPoint() {
+  if (!STATE.player) {
+    return null;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    return null;
+  }
+
+  return {
+    x: rect.left + (STATE.player.x / canvas.width) * rect.width,
+    y: rect.top + (STATE.player.y / canvas.height) * rect.height,
+  };
 }
 
 /**
@@ -312,6 +370,26 @@ const overlayUi = createOverlayUiController({
 });
 
 /**
+ * Mobile layout/orientation/swipe controller
+ */
+const mobileRuntime = createMobileRuntimeController({
+  body: document.body,
+  gameShell,
+  canvas,
+  rotateOverlay: mobileRotateOverlay,
+  runtimeState: STATE.runtime,
+  baseWidth: BASE_WIDTH,
+  baseHeight: BASE_HEIGHT,
+  shouldAcceptSwipe: () => STATE.mode === "playing" && !STATE.paused && (!walletModal || walletModal.hidden),
+  onDirectionInput: handleDirectionInput,
+  getTapReferencePoint: getPlayerClientPoint,
+  onRuntimeStateChange: () => {
+    syncControlsHint();
+    syncMobilePauseButton();
+  },
+});
+
+/**
  * Forces win state for local debug flow
  */
 function triggerDebugVictory() {
@@ -345,6 +423,7 @@ function triggerDebugVictory() {
     buttonLabel: "Play Again",
     score: STATE.score,
   });
+  syncMobilePauseButton();
 }
 
 // ------------------------------------------------------------
@@ -443,6 +522,7 @@ function resetEntities() {
  * Starts a fresh run and resets score and runtime flags
  */
 function startNewGame() {
+  mobileRuntime.requestLandscapeLock().catch(() => {});
   STATE.mode = "playing";
   STATE.score = 0;
   STATE.lives = 3;
@@ -464,6 +544,7 @@ function startNewGame() {
   setClaimStatus("");
   walletUi.closeWalletModal();
   overlayUi.hideOverlay();
+  syncMobilePauseButton();
   ensureAudioContext();
   if (audioCtx?.state === "suspended") {
     audioCtx.resume().catch(() => {});
@@ -802,6 +883,7 @@ function eatPellets() {
       buttonLabel: "Play Again",
       score: STATE.score,
     });
+    syncMobilePauseButton();
     playTone(840, 0.1, "sawtooth", 0.06);
     playTone(1040, 0.15, "triangle", 0.05);
   }
@@ -854,6 +936,7 @@ function handleEnemyCollisions() {
           buttonLabel: "Try Again",
           score: STATE.score,
         });
+        syncMobilePauseButton();
       } else {
         STATE.roundResetTimer = 0.95;
       }
@@ -988,6 +1071,9 @@ function renderGameToText() {
     coordinate_system: "origin top-left; x right; y down; maze tile size 32px",
     mode: STATE.mode,
     paused: STATE.paused,
+    mobile: STATE.runtime.isMobile,
+    landscape: STATE.runtime.isLandscape,
+    rotate_notice_visible: STATE.runtime.rotateNoticeVisible,
     score: STATE.score,
     lives: STATE.lives,
     power_timer: Number(STATE.powerTimer.toFixed(2)),
@@ -1026,6 +1112,7 @@ function handleDirectionInput(dir) {
 function togglePause() {
   if (STATE.mode !== "playing") return;
   STATE.paused = !STATE.paused;
+  syncMobilePauseButton();
   rewardsController.queueSessionEvent("pause_toggled", {
     paused: STATE.paused,
   });
@@ -1035,6 +1122,9 @@ function togglePause() {
  * Toggles browser fullscreen mode
  */
 async function toggleFullscreen() {
+  if (mobileRuntime.isMobileRuntime()) {
+    return;
+  }
   if (!document.fullscreenElement) {
     await document.documentElement.requestFullscreen();
   } else {
@@ -1065,6 +1155,21 @@ function isTextInputElement(element) {
 }
 
 /**
+ * Checks whether an event target belongs to the visible reward claim panel
+ *
+ * @param {EventTarget | null} target Browser event target
+ * @returns {boolean} True when target is inside visible reward panel
+ */
+function isClaimPanelTarget(target) {
+  return Boolean(
+    rewardPanel &&
+      !rewardPanel.hidden &&
+      target instanceof Element &&
+      rewardPanel.contains(target),
+  );
+}
+
+/**
  * Handles keyboard keydown events for gameplay and UI
  */
 function onKeyDown(event) {
@@ -1072,11 +1177,18 @@ function onKeyDown(event) {
   keysPressed.add(code);
   const isTypingTarget = isTextInputElement(event.target);
   const isWalletModalOpen = Boolean(walletModal && !walletModal.hidden);
+  const isClaimTarget = isClaimPanelTarget(event.target);
 
   if (isWalletModalOpen) {
     if (code === "Escape") {
       walletUi.closeWalletModal();
     }
+    return;
+  }
+
+  if (code === "Enter" && STATE.mode === "won" && isClaimTarget) {
+    event.preventDefault();
+    rewardsController.submitRewardClaim(readClaimForm()).catch(() => {});
     return;
   }
 
@@ -1093,7 +1205,7 @@ function onKeyDown(event) {
   }
 
   if (code === "KeyF") {
-    if (isTypingTarget) {
+    if (isTypingTarget || mobileRuntime.isMobileRuntime()) {
       return;
     }
     toggleFullscreen().catch(() => {});
@@ -1117,6 +1229,7 @@ function onKeyUp(event) {
  * Registers DOM and input event listeners
  */
 function setupEvents() {
+  mobileRuntime.installEventListeners();
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
   startButton.addEventListener("click", () => startNewGame());
@@ -1149,14 +1262,18 @@ function setupEvents() {
       triggerDebugVictory();
     });
   }
+  if (mobilePauseButton) {
+    mobilePauseButton.addEventListener("click", () => {
+      togglePause();
+    });
+  }
 
   document.addEventListener("fullscreenchange", () => {
-    if (!document.fullscreenElement) {
-      canvas.style.width = "min(96vw, 960px)";
-    }
+    mobileRuntime.applyLayout();
   });
 
   menuOverlay.addEventListener("click", () => {
+    mobileRuntime.requestLandscapeLock().catch(() => {});
     ensureAudioContext();
     if (audioCtx?.state === "suspended") {
       audioCtx.resume().catch(() => {});
@@ -1172,6 +1289,9 @@ function init() {
   initMaze();
   resetEntities();
   setupEvents();
+  mobileRuntime.applyLayout();
+  mobileRuntime.requestLandscapeLock().catch(() => {});
+  syncControlsHint();
   if (devWinButton) {
     devWinButton.hidden = !isDebugToolsEnabled();
   }
@@ -1182,6 +1302,7 @@ function init() {
   walletUi.updateTopWalletButton();
   walletUi.updateWalletStatusForClaimPanel();
   setClaimControlsDisabled(false);
+  syncMobilePauseButton();
   if (STATE.rewards.apiBase) {
     setClaimStatus(`Rewards API: ${STATE.rewards.apiBase}`);
   } else {
@@ -1189,7 +1310,14 @@ function init() {
   }
   window.render_game_to_text = renderGameToText;
   window.advanceTime = advanceTime;
-  window.__fpom_game = { state: STATE, walletUi, rewardsController, gameVariant: GAME_VARIANT.id };
+  window.__fpom_game = {
+    state: STATE,
+    walletUi,
+    rewardsController,
+    mobileRuntime,
+    overlayUi,
+    gameVariant: GAME_VARIANT.id,
+  };
   render();
 
   if (animationFrame) {

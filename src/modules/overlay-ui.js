@@ -28,6 +28,7 @@ export function createOverlayUiController(options) {
    */
   function hideOverlay() {
     menuOverlay.style.display = "none";
+    menuOverlay.dataset.overlayMode = "hidden";
     if (rewardPanel) {
       rewardPanel.hidden = true;
     }
@@ -47,6 +48,7 @@ export function createOverlayUiController(options) {
     const hintNode = menuOverlay.querySelector(".hint");
 
     menuOverlay.style.display = "grid";
+    menuOverlay.dataset.overlayMode = mode;
     if (titleNode) {
       titleNode.textContent = title;
     }

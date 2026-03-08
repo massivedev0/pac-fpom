@@ -289,6 +289,9 @@ function drawModeBanner(ctx, state, baseWidth, baseHeight) {
   let title = "FPOM Meme Hunt";
   if (state.mode === "gameover") title = "Game Over";
   if (state.mode === "won") title = "FPOM Wins";
+  const controlsPrimary = state.runtime?.controlsBannerPrimary || "Move: WASD / Arrows  |  Power hunt: eat red orbs";
+  const controlsSecondary = state.runtime?.controlsBannerSecondary || "F: fullscreen  |  P: pause";
+  const startLine = state.runtime?.controlsBannerStart || "Press Enter / Space or click Start Hunt";
 
   ctx.fillStyle = "#5a1208";
   ctx.font = '44px "Bungee", sans-serif';
@@ -297,8 +300,8 @@ function drawModeBanner(ctx, state, baseWidth, baseHeight) {
   ctx.fillStyle = "#2f1a15";
   ctx.font = '12px "Press Start 2P", monospace';
   ctx.fillText("No more scams. Gimme a serious fake.", x + 70, y + 112);
-  ctx.fillText("Move: WASD / Arrows  |  Power hunt: eat red orbs", x + 70, y + 148);
-  ctx.fillText("F: fullscreen  |  P: pause", x + 70, y + 176);
+  ctx.fillText(controlsPrimary, x + 70, y + 148);
+  ctx.fillText(controlsSecondary, x + 70, y + 176);
   ctx.fillText("Collect memes. Eat red orb to hunt Doge, Shiba, Pepe.", x + 70, y + 204);
-  ctx.fillText("Press Enter / Space or click Start Hunt", x + 70, y + 236);
+  ctx.fillText(startLine, x + 70, y + 236);
 }
