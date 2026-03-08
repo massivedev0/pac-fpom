@@ -45,6 +45,12 @@ API will be available at `http://localhost:8787`.
 - `GET /health`
 - `GET /public/config`
 
+## Admin endpoints
+
+- `GET /admin/review/:claimId?action=approve|reject&token=...`
+- `GET /admin/payouts?token=...`
+- `GET /admin/payouts/:claimId?action=retry&token=...`
+
 ## Tests
 
 ```bash
@@ -87,6 +93,20 @@ npm run logs -- --claim cmm8...
 npm run logs -- --json
 ```
 
+## Admin links from CLI
+
+```bash
+cd backend
+npm run admin:links
+npm run admin:links -- --claim cmm8...
+npm run admin:links -- --claim cmm8... --json
+```
+
+The command reads `ADMIN_REVIEW_BASE_URL` and `ADMIN_REVIEW_SECRET` from backend env and prints:
+
+- tokenized `/admin/payouts` URL
+- for a specific claim: `approve`, `reject`, and `retry payout` URLs
+
 ## Environment variables
 
 See `.env.example`.
@@ -121,6 +141,7 @@ Main ones:
 - Claim state, payout jobs, audit logs, and manual-review decisions are persisted in SQLite
 - On startup the backend resumes `QUEUED` payouts and rechecks `CONFIRMED` payouts with stored `txHash`
 - `PAID` and `REJECTED` claims stay terminal across restarts
+- Admin payout list page shows recent non-terminal payout jobs and generated retry links for retryable claims
 
 ## Next step
 

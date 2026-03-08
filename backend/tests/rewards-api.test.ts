@@ -1066,3 +1066,154 @@ test("startup recovery should finalize confirmed payouts with tx hash", async ()
     await app.close();
   }
 });
+
+test("admin payout list should render retryable claims", async () => {
+  const payoutSender: PayoutSender = {
+    isConfigured: () => true,
+    async sendTokenPayout() {
+      return {
+        outcome: "pending",
+        txHash: "op_retryable_123",
+        rawAmount: "106050000000000000000000",
+        tokenDecimals: 18,
+        observedStatus: "SUBMITTED",
+      };
+    },
+    async reconcilePayout(txHash) {
+      return {
+        outcome: "pending",
+        txHash,
+        observedStatus: "PendingInclusion",
+      };
+    },
+  };
+
+  const context = await createTestContext(
+    {
+      payoutDryRun: false,
+      adminReviewSecret: "test-review-secret",
+      adminReviewBaseUrl: "http://localhost:8787",
+    },
+    payoutSender,
+  );
+
+  try {
+    const claimId = await createPaidClaim(context.app);
+    const listToken = hmacSha256Hex(BASE_CONFIG.adminReviewSecret, "payouts:list");
+    const response = await context.app.inject({
+      method: "GET",
+      url: `/admin/payouts?token=${listToken}`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /Pending FPOM payouts/);
+    assert.match(response.body, new RegExp(claimId));
+    assert.match(response.body, /Retry/);
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("admin payout retry route should resubmit queued payout", async () => {
+  const payoutSender: PayoutSender = {
+    isConfigured: () => true,
+    async sendTokenPayout() {
+      return {
+        outcome: "pending",
+        txHash: "op_manual_retry_123",
+        rawAmount: "106050000000000000000000",
+        tokenDecimals: 18,
+        observedStatus: "SUBMITTED",
+      };
+    },
+    async reconcilePayout(txHash) {
+      return {
+        outcome: "pending",
+        txHash,
+        observedStatus: "PendingInclusion",
+      };
+    },
+  };
+
+  const prisma = new PrismaClient();
+  await clearDatabase(prisma);
+
+  const session = await prisma.session.create({
+    data: {
+      nonce: "manual-retry-session",
+      ipHash: "ip-hash-retry",
+      fpHash: "fp-hash-retry",
+    },
+  });
+  await prisma.run.create({
+    data: {
+      sessionId: session.id,
+      won: true,
+      durationMs: WINNING_RUN.durationMs,
+      pelletsEaten: WINNING_RUN.pelletsEaten,
+      powerPelletsEaten: WINNING_RUN.powerPelletsEaten,
+      enemiesEaten: WINNING_RUN.enemiesEaten,
+      finalScoreClient: WINNING_RUN.finalScoreClient,
+      finalScoreServer: WINNING_RUN.finalScoreClient,
+      riskScore: 2,
+    },
+  });
+  const claim = await prisma.claim.create({
+    data: {
+      sessionId: session.id,
+      address: VALID_ADDRESS,
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      amount: WINNING_RUN.finalScoreClient,
+      challenge: "manual-retry-challenge",
+      status: "CONFIRMED",
+      ipHash: "ip-hash-retry",
+      fpHash: "fp-hash-retry",
+    },
+  });
+  await prisma.payoutJob.create({
+    data: {
+      claimId: claim.id,
+      status: "QUEUED",
+    },
+  });
+
+  const app = createApp({
+    config: {
+      ...BASE_CONFIG,
+      payoutDryRun: false,
+      adminReviewSecret: "test-review-secret",
+      adminReviewBaseUrl: "http://localhost:8787",
+    },
+    prisma,
+    payoutSender,
+    enableBackgroundWorkers: false,
+  });
+
+  try {
+    await app.ready();
+    const retryToken = hmacSha256Hex(BASE_CONFIG.adminReviewSecret, `payout:${claim.id}:retry`);
+    const response = await app.inject({
+      method: "GET",
+      url: `/admin/payouts/${claim.id}?action=retry&token=${retryToken}`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /Payout retry requested/);
+
+    const updatedClaim = await prisma.claim.findUnique({ where: { id: claim.id } });
+    assert.ok(updatedClaim);
+    assert.equal(updatedClaim.status, "CONFIRMED");
+    assert.equal(updatedClaim.txHash, "op_manual_retry_123");
+
+    const retryLog = await prisma.auditLog.findFirst({
+      where: {
+        claimId: claim.id,
+        event: "PAYOUT_RETRY_TRIGGERED_MANUAL",
+      },
+    });
+    assert.ok(retryLog);
+  } finally {
+    await app.close();
+  }
+});

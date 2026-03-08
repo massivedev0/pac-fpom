@@ -110,6 +110,7 @@ type PayoutContext = {
 };
 
 type ManualReviewAction = "approve" | "reject";
+type AdminPayoutAction = "retry";
 
 type PayoutOptions = {
   bypassManualReviewGuards?: boolean;
@@ -171,6 +172,17 @@ function buildManualReviewToken(secret: string, claimId: string, action: ManualR
 }
 
 /**
+ * Builds signed admin token for payout-list and retry actions
+ *
+ * @param {string} secret Shared review secret
+ * @param {string} scope Admin action scope
+ * @returns {string} HMAC token
+ */
+function buildAdminScopeToken(secret: string, scope: string): string {
+  return hmacSha256Hex(secret, scope);
+}
+
+/**
  * Validates signed admin review token
  *
  * @param {string} secret Shared review secret
@@ -210,6 +222,35 @@ function buildManualReviewLink(
   }
   const token = buildManualReviewToken(config.adminReviewSecret, claimId, action);
   return `${config.adminReviewBaseUrl}/admin/review/${encodeURIComponent(claimId)}?action=${action}&token=${token}`;
+}
+
+/**
+ * Builds token-protected admin payout list link
+ *
+ * @param {AppConfig} config Backend config
+ * @returns {string | null} Payout list URL or null when admin links are disabled
+ */
+function buildAdminPayoutListLink(config: AppConfig): string | null {
+  if (!config.adminReviewBaseUrl || !config.adminReviewSecret) {
+    return null;
+  }
+  const token = buildAdminScopeToken(config.adminReviewSecret, "payouts:list");
+  return `${config.adminReviewBaseUrl}/admin/payouts?token=${token}`;
+}
+
+/**
+ * Builds token-protected admin payout retry link
+ *
+ * @param {AppConfig} config Backend config
+ * @param {string} claimId Claim id
+ * @returns {string | null} Retry URL or null when admin links are disabled
+ */
+function buildAdminPayoutRetryLink(config: AppConfig, claimId: string): string | null {
+  if (!config.adminReviewBaseUrl || !config.adminReviewSecret) {
+    return null;
+  }
+  const token = buildAdminScopeToken(config.adminReviewSecret, `payout:${claimId}:retry`);
+  return `${config.adminReviewBaseUrl}/admin/payouts/${encodeURIComponent(claimId)}?action=retry&token=${token}`;
 }
 
 /**
@@ -297,6 +338,101 @@ function renderAdminReviewPage(input: {
       <p>${escapeHtml(input.summary)}</p>
       <section class="panel">
         <table>${detailsHtml}</table>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
+/**
+ * Renders admin payout list page
+ *
+ * @param {{
+ *   title: string;
+ *   summary: string;
+ *   rows: Array<{
+ *     claimId: string;
+ *     status: string;
+ *     payoutStatus: string;
+ *     amount: number;
+ *     address: string;
+ *     txHash: string | null;
+ *     updatedAt: Date;
+ *     retryLink: string | null;
+ *   }>;
+ * }} input Page content
+ * @returns {string} Rendered HTML page
+ */
+function renderAdminPayoutListPage(input: {
+  title: string;
+  summary: string;
+  rows: Array<{
+    claimId: string;
+    status: string;
+    payoutStatus: string;
+    amount: number;
+    address: string;
+    txHash: string | null;
+    updatedAt: Date;
+    retryLink: string | null;
+  }>;
+}): string {
+  const rowsHtml = input.rows
+    .map(
+      (row) => `<tr>
+        <td>${escapeHtml(row.claimId)}</td>
+        <td>${escapeHtml(row.status)}</td>
+        <td>${escapeHtml(row.payoutStatus)}</td>
+        <td>${escapeHtml(row.amount.toLocaleString("en-US"))}</td>
+        <td>${escapeHtml(row.address)}</td>
+        <td>${escapeHtml(row.txHash || "-")}</td>
+        <td>${escapeHtml(row.updatedAt.toISOString())}</td>
+        <td>${row.retryLink ? `<a href="${escapeHtml(row.retryLink)}">Retry</a>` : "-"}</td>
+      </tr>`,
+    )
+    .join("");
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtml(input.title)}</title>
+    <style>
+      body { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0f172a; color: #e2e8f0; }
+      main { max-width: 1200px; margin: 0 auto; padding: 32px 20px 48px; }
+      h1 { margin: 0 0 12px; font-size: 32px; color: #f8fafc; }
+      p { margin: 0 0 20px; line-height: 1.6; color: #cbd5e1; }
+      .panel { border: 1px solid #334155; border-radius: 16px; background: #111827; overflow: hidden; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #1f2937; vertical-align: top; }
+      th { color: #93c5fd; }
+      td { color: #f8fafc; word-break: break-word; }
+      tr:last-child th, tr:last-child td { border-bottom: 0; }
+      a { color: #fca5a5; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${escapeHtml(input.title)}</h1>
+      <p>${escapeHtml(input.summary)}</p>
+      <section class="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Claim ID</th>
+              <th>Claim status</th>
+              <th>Payout job</th>
+              <th>Amount</th>
+              <th>Address</th>
+              <th>Tx hash</th>
+              <th>Updated</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
       </section>
     </main>
   </body>
@@ -1615,6 +1751,32 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     }
   }
 
+  /**
+   * Checks whether claim can be retried through admin payout tooling
+   *
+   * @param {{
+   *   status: string;
+   *   txHash: string | null;
+   *   payoutJob: { status: string } | null;
+   * }} claim Claim snapshot
+   * @returns {boolean} True when retry action is allowed
+   */
+  function isRetryablePayoutClaim(claim: {
+    status: string;
+    txHash: string | null;
+    payoutJob: { status: string } | null;
+  }): boolean {
+    if (claim.status === CLAIM_STATUSES.PAID || claim.status === CLAIM_STATUSES.REJECTED) {
+      return false;
+    }
+
+    if (claim.status === CLAIM_STATUSES.CONFIRMED) {
+      return true;
+    }
+
+    return claim.payoutJob?.status === PAYOUT_STATUSES.QUEUED;
+  }
+
   if (enableBackgroundWorkers) {
     app.addHook("onReady", async () => {
       await recoverPersistedPayoutState().catch((error) => {
@@ -1979,6 +2141,154 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         renderAdminReviewPage({
           title: pageTitle,
           summary,
+          claim: updatedClaim,
+        }),
+      );
+  });
+
+  app.get("/admin/payouts", async (req, reply) => {
+    const token = String((req.query as { token?: string })?.token || "").trim();
+    if (
+      !config.adminReviewSecret ||
+      !safeEqual(buildAdminScopeToken(config.adminReviewSecret, "payouts:list"), token)
+    ) {
+      return reply
+        .code(403)
+        .type("text/html; charset=utf-8")
+        .send(
+          renderAdminReviewPage({
+            title: "Payout list rejected",
+            summary: "The payout list token is invalid",
+          }),
+        );
+    }
+
+    const claims = await prisma.claim.findMany({
+      where: {
+        OR: [
+          { status: CLAIM_STATUSES.CONFIRMED },
+          { payoutJob: { is: { status: PAYOUT_STATUSES.QUEUED } } },
+          { payoutJob: { is: { status: PAYOUT_STATUSES.FAILED } } },
+        ],
+      },
+      include: { payoutJob: true },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      take: 100,
+    });
+
+    return reply
+      .code(200)
+      .type("text/html; charset=utf-8")
+      .send(
+        renderAdminPayoutListPage({
+          title: "Pending FPOM payouts",
+          summary: "Recent non-terminal payout jobs stored in SQLite. Retry links are generated only for retryable claims.",
+          rows: claims.map((claim) => ({
+            claimId: claim.id,
+            status: claim.status,
+            payoutStatus: claim.payoutJob?.status ?? "-",
+            amount: claim.amount,
+            address: claim.address,
+            txHash: claim.txHash,
+            updatedAt: claim.updatedAt,
+            retryLink: isRetryablePayoutClaim(claim) ? buildAdminPayoutRetryLink(config, claim.id) : null,
+          })),
+        }),
+      );
+  });
+
+  app.get("/admin/payouts/:claimId", async (req, reply) => {
+    const claimId = String((req.params as { claimId?: string })?.claimId || "").trim();
+    const actionRaw = String((req.query as { action?: string })?.action || "").trim().toLowerCase();
+    const token = String((req.query as { token?: string })?.token || "").trim();
+
+    if (!claimId || actionRaw !== "retry") {
+      return reply
+        .code(400)
+        .type("text/html; charset=utf-8")
+        .send(
+          renderAdminReviewPage({
+            title: "Invalid payout action",
+            summary: "Use a valid claim id and retry action",
+          }),
+        );
+    }
+
+    const expectedToken = config.adminReviewSecret
+      ? buildAdminScopeToken(config.adminReviewSecret, `payout:${claimId}:retry`)
+      : "";
+    if (!config.adminReviewSecret || !safeEqual(expectedToken, token)) {
+      return reply
+        .code(403)
+        .type("text/html; charset=utf-8")
+        .send(
+          renderAdminReviewPage({
+            title: "Retry link rejected",
+            summary: "The payout retry token is invalid",
+          }),
+        );
+    }
+
+    const claim = await prisma.claim.findUnique({
+      where: { id: claimId },
+      include: { payoutJob: true },
+    });
+    if (!claim) {
+      return reply
+        .code(404)
+        .type("text/html; charset=utf-8")
+        .send(
+          renderAdminReviewPage({
+            title: "Claim not found",
+            summary: "No payout claim exists for this retry link",
+          }),
+        );
+    }
+
+    if (!isRetryablePayoutClaim(claim)) {
+      return reply
+        .code(409)
+        .type("text/html; charset=utf-8")
+        .send(
+          renderAdminReviewPage({
+            title: "Payout retry skipped",
+            summary: "This claim is not retryable in its current state",
+            claim,
+          }),
+        );
+    }
+
+    await writeAuditLog({
+      event: "PAYOUT_RETRY_TRIGGERED_MANUAL",
+      claimId: claim.id,
+      sessionId: claim.sessionId,
+      address: claim.address,
+      payload: {
+        previousStatus: claim.status,
+        payoutJobStatus: claim.payoutJob?.status ?? null,
+        txHash: claim.txHash,
+      },
+    });
+
+    if (claim.txHash) {
+      await reconcilePendingPayout(claim.id).catch((error) => {
+        app.log.warn({ err: error, claimId: claim.id }, "Manual payout retry reconcile failed");
+      });
+      schedulePayoutFinalization(claim.id, claim.txHash);
+    } else {
+      await enqueueAndProcessPayout(claim.id).catch((error) => {
+        app.log.warn({ err: error, claimId: claim.id }, "Manual payout retry enqueue failed");
+      });
+    }
+
+    const updatedClaim = await prisma.claim.findUnique({ where: { id: claim.id } });
+    return reply
+      .code(200)
+      .type("text/html; charset=utf-8")
+      .send(
+        renderAdminReviewPage({
+          title: "Payout retry requested",
+          summary: "The payout retry was triggered and the latest claim state is shown below",
           claim: updatedClaim,
         }),
       );

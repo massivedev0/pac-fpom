@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "test": "node scripts/run-tests.mjs",
     "logs": "tsx scripts/show-logs.ts",
+    "admin:links": "tsx scripts/admin-links.ts",
     "prisma:sync": "prisma db push --skip-generate",
     "prisma:sync:test": "node scripts/run-tests.mjs --sync-only",
     "prisma:generate": "prisma generate",
