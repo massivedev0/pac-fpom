@@ -17,12 +17,48 @@
     <main class="layout">
       <section class="game-shell" aria-label="FPOM game shell">
         <canvas id="game-canvas" width="960" height="640"></canvas>
+        <button id="top-wallet-btn" class="top-wallet-btn" type="button">Connect Wallet</button>
+        <button id="dev-win-btn" class="dev-win-btn" type="button" hidden>Victory</button>
+        <div id="wallet-modal" class="wallet-modal" hidden>
+          <div class="wallet-modal-card" role="dialog" aria-modal="true" aria-label="Connect wallet">
+            <button id="wallet-modal-close" class="wallet-modal-close" type="button" aria-label="Close wallet modal">
+              x
+            </button>
+            <h2>Connect Wallet</h2>
+            <p id="wallet-modal-subtitle" class="wallet-modal-subtitle" hidden></p>
+            <div id="wallet-options" class="wallet-options"></div>
+          </div>
+        </div>
         <div class="menu-overlay" id="menu-overlay">
           <img class="overlay-logo" src="./assets/fpom/fpom-logo-transparent.png" alt="FPOM logo" />
           <h1>FPOM Meme Hunt</h1>
           <p class="subtitle">No more scams. Gimme a serious fake.</p>
+          <div id="reward-panel" class="reward-panel" hidden>
+            <p id="reward-summary" class="reward-summary">Round reward: 0 FPOM</p>
+            <div id="wallet-connect-row" class="reward-row">
+              <p id="wallet-status" class="wallet-status">Use the Connect Wallet button in the top-right corner</p>
+            </div>
+            <p class="reward-note">
+              To claim rewards, complete Like + Retweet of
+              <a id="promo-tweet-link" href="#" target="_blank" rel="noopener noreferrer">X_PROMO_TWEET</a>
+            </p>
+            <div id="x-profile-row" class="reward-row">
+              <label class="reward-label" for="x-profile">X profile URL</label>
+              <input
+                id="x-profile"
+                class="reward-input"
+                type="url"
+                inputmode="url"
+                autocomplete="off"
+                placeholder="https://x.com/account"
+                maxlength="200"
+              />
+            </div>
+            <button id="claim-btn" class="claim-btn" type="button">Claim FPOM</button>
+            <p id="claim-status" class="claim-status" role="status" aria-live="polite"></p>
+          </div>
           <button id="start-btn" type="button">Start Hunt</button>
-          <p class="hint">Move: WASD / Arrows · Power hunt: eat red orbs · F: fullscreen · P: pause</p>
+          <p class="hint">Move: WASD / Arrows · Power hunt: eat red orbs<br />F: fullscreen · P: pause</p>
         </div>
       </section>
     </main>

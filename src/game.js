@@ -1,42 +1,75 @@
+import {
+  BASE_HEIGHT,
+  BASE_WIDTH,
+  DEFAULT_GAME_VARIANT,
+  DEFAULT_DEBUG_WIN_SCORE,
+  DEFAULT_X_PROMO_TWEET,
+  DEV_TEST_GAME_VARIANT,
+  DIRS,
+  FIXED_DT,
+  SCORE_VALUES,
+  TILE,
+} from "./modules/constants.js";
+import { renderScene } from "./modules/render-system.js";
+import { isValidMassaAddress } from "./modules/rewards-helpers.js";
+import { discoverWalletCandidates, getCandidateAccounts, resetWalletCandidate } from "./modules/wallet-service.js";
+import { createWalletUiController } from "./modules/wallet-ui.js";
+import { createRewardsController } from "./modules/rewards-controller.js";
+import { createOverlayUiController } from "./modules/overlay-ui.js";
+
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
 const startButton = document.getElementById("start-btn");
 const menuOverlay = document.getElementById("menu-overlay");
+const topWalletButton = document.getElementById("top-wallet-btn");
+const walletModal = document.getElementById("wallet-modal");
+const walletModalClose = document.getElementById("wallet-modal-close");
+const walletModalSubtitle = document.getElementById("wallet-modal-subtitle");
+const walletOptions = document.getElementById("wallet-options");
+const rewardPanel = document.getElementById("reward-panel");
+const rewardSummary = document.getElementById("reward-summary");
+const promoTweetLink = document.getElementById("promo-tweet-link");
+const xProfileInput = document.getElementById("x-profile");
+const walletStatus = document.getElementById("wallet-status");
+const claimButton = document.getElementById("claim-btn");
+const claimStatus = document.getElementById("claim-status");
+const devWinButton = document.getElementById("dev-win-btn");
 
-const BASE_WIDTH = 960;
-const BASE_HEIGHT = 640;
-const TILE = 32;
-const FIXED_DT = 1 / 60;
+/**
+ * Checks whether current host is local-only
+ *
+ * @returns {boolean} True when running on localhost or loopback
+ */
+function isLocalHost() {
+  return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+}
 
-const DIRS = {
-  left: { x: -1, y: 0 },
-  right: { x: 1, y: 0 },
-  up: { x: 0, y: -1 },
-  down: { x: 0, y: 1 },
-};
+/**
+ * Reads local-only dev mode selector from query string
+ *
+ * @returns {string} Local dev mode value or empty string
+ */
+function getLocalDevMode() {
+  if (!isLocalHost()) {
+    return "";
+  }
+  return new URLSearchParams(window.location.search).get("dev") || "";
+}
 
-const MAZE_TEMPLATE = [
-  "############################",
-  "#............##............#",
-  "#.####.#####....#####.####.#",
-  "#*####.#####.##.#####.####*#",
-  "#..........................#",
-  "#.####.##.########.##.####.#",
-  "#......##....##....##......#",
-  "######.#####.##.#####.######",
-  "######.##..........##.######",
-  "######.##..........##.######",
-  "######.##..........##.######",
-  "#..........#....#..........#",
-  "#.####.#####.##.#####.####.#",
-  "#*..##................##..*#",
-  "###.##.##.########.##.##.###",
-  "#......##....##....##......#",
-  "#.##########.##.##########.#",
-  "#..........................#",
-  "############################",
-];
+/**
+ * Chooses runtime game variant based on local query params
+ *
+ * @returns {typeof DEFAULT_GAME_VARIANT} Selected game variant
+ */
+function getGameVariant() {
+  if (getLocalDevMode() === "2") {
+    return DEV_TEST_GAME_VARIANT;
+  }
+  return DEFAULT_GAME_VARIANT;
+}
 
+const GAME_VARIANT = getGameVariant();
+const MAZE_TEMPLATE = GAME_VARIANT.mazeTemplate;
 const MAZE_ROWS = MAZE_TEMPLATE.length;
 const MAZE_COLS = MAZE_TEMPLATE[0].length;
 const MAZE_WIDTH = MAZE_COLS * TILE;
@@ -44,6 +77,10 @@ const MAZE_HEIGHT = MAZE_ROWS * TILE;
 const MAZE_OFFSET_X = Math.floor((BASE_WIDTH - MAZE_WIDTH) / 2);
 const MAZE_OFFSET_Y = Math.floor((BASE_HEIGHT - MAZE_HEIGHT) / 2);
 
+/**
+ * Central mutable runtime state of the game session
+ * Kept in one object to simplify serialization and UI debug snapshots
+ */
 const STATE = {
   mode: "title",
   score: 0,
@@ -60,6 +97,36 @@ const STATE = {
   enemies: [],
   effects: [],
   roundResetTimer: 0,
+  runStats: {
+    startedAtMs: 0,
+    pelletsEaten: 0,
+    powerPelletsEaten: 0,
+    enemiesEaten: 0,
+  },
+  rewards: {
+    apiBase: "",
+    promoTweetUrl: "",
+    txExplorerUrlTemplate: "",
+    promoOverrideLocked: false,
+    promoConfigFetchTried: false,
+    sessionId: null,
+    sessionRetryAtMs: 0,
+    nextEventSeq: 0,
+    eventBuffer: [],
+    eventOverflow: false,
+    eventFlushInFlight: false,
+    claimInFlight: false,
+    claimStatusText: "",
+    walletProviders: [],
+    connectedAddress: "",
+    walletProviderName: "",
+    walletProvider: null,
+    walletAccount: null,
+    walletModalInFlight: false,
+    activeClaimId: null,
+    lastClaimTxHash: "",
+    claimLocked: false,
+  },
 };
 
 const images = {
@@ -69,14 +136,22 @@ const images = {
   pepe: loadImage("../assets/memes/pepe.png"),
 };
 
-const enemyTypes = ["doge", "shiba", "pepe", "doge", "shiba", "pepe"];
-
 const keysPressed = new Set();
 let audioCtx = null;
 let animationFrame = null;
 let lastTs = 0;
 let accumulator = 0;
 
+// ------------------------------------------------------------
+// Bootstrap / environment helpers
+// ------------------------------------------------------------
+
+/**
+ * Loads image asset relative to current module URL
+ *
+ * @param {string} src Relative asset path
+ * @returns {HTMLImageElement}
+ */
 function loadImage(src) {
   const img = new Image();
   // Resolve URLs relative to this module file (works on GitHub Pages subpaths).
@@ -84,6 +159,201 @@ function loadImage(src) {
   return img;
 }
 
+/**
+ * Applies promo tweet URL to local state and reward panel link
+ *
+ * @param {string} url Candidate URL from config/query/backend
+ */
+function applyPromoTweetUrl(url) {
+  const normalized = (url || "").trim() || DEFAULT_X_PROMO_TWEET;
+  STATE.rewards.promoTweetUrl = normalized;
+
+  if (promoTweetLink) {
+    promoTweetLink.href = normalized;
+    promoTweetLink.textContent = normalized;
+  }
+}
+
+/**
+ * Checks whether local debug tools are enabled
+ */
+function isDebugToolsEnabled() {
+  return getLocalDevMode() === "1";
+}
+
+// ------------------------------------------------------------
+// Rewards panel + wallet connection UI
+// ------------------------------------------------------------
+
+/**
+ * Renders claim status text and optional explorer link into reward UI
+ *
+ * @param {{ text: string; txExplorerUrl?: string; txHash?: string }} input Claim status view model
+ */
+function setClaimStatusView(input) {
+  const text = String(input?.text || "");
+  const txExplorerUrl = String(input?.txExplorerUrl || "").trim();
+  const txHash = String(input?.txHash || "").trim();
+
+  STATE.rewards.claimStatusText = text;
+  if (!claimStatus) {
+    return;
+  }
+
+  claimStatus.textContent = "";
+  if (!text) {
+    return;
+  }
+
+  claimStatus.append(document.createTextNode(text));
+  if (txExplorerUrl) {
+    claimStatus.append(document.createTextNode(" "));
+    const link = document.createElement("a");
+    link.className = "claim-status-link";
+    link.href = txExplorerUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = txHash ? "Open in explorer" : "Explorer";
+    claimStatus.append(link);
+  }
+}
+
+/**
+ * Updates claim status text in state and UI
+ *
+ * @param {string} text Claim status text
+ */
+function setClaimStatus(text) {
+  setClaimStatusView({ text });
+}
+
+/**
+ * Enables or disables reward claim controls
+ *
+ * @param {boolean} disabled True while claim request is in flight
+ */
+function setClaimControlsDisabled(disabled) {
+  if (claimButton) {
+    claimButton.disabled = disabled || STATE.rewards.claimLocked;
+  }
+  if (xProfileInput) {
+    xProfileInput.disabled = disabled;
+  }
+}
+
+/**
+ * Locks or unlocks the claim button after payout flow has started
+ *
+ * @param {boolean} locked True to keep Claim FPOM disabled
+ */
+function setClaimSubmissionLocked(locked) {
+  STATE.rewards.claimLocked = locked;
+  setClaimControlsDisabled(false);
+}
+
+/**
+ * Updates wallet status text in reward panel
+ */
+function setWalletStatus(text) {
+  if (walletStatus) {
+    walletStatus.textContent = text;
+  }
+}
+
+/**
+ * Wallet modal and wallet-status controller
+ */
+const walletUi = createWalletUiController({
+  rewardsState: STATE.rewards,
+  dom: {
+    topWalletButton,
+    walletModal,
+    walletModalClose,
+    walletModalSubtitle,
+    walletOptions,
+  },
+  setClaimStatus,
+  setWalletStatus,
+  isValidMassaAddress,
+  discoverWalletCandidates,
+  getCandidateAccounts,
+  resetWalletCandidate,
+});
+
+/**
+ * Rewards/session/claim controller
+ */
+const rewardsController = createRewardsController({
+  rewardsState: STATE.rewards,
+  runStats: STATE.runStats,
+  setClaimStatus,
+  setClaimStatusView,
+  setClaimControlsDisabled,
+  setClaimSubmissionLocked,
+  applyPromoTweetUrl,
+  getScore: () => STATE.score,
+  getMode: () => STATE.mode,
+});
+
+/**
+ * Overlay/menu controller
+ */
+const overlayUi = createOverlayUiController({
+  menuOverlay,
+  startButton,
+  rewardPanel,
+  rewardSummary,
+  setTopWalletButtonVisible: (visible) => {
+    walletUi.setTopWalletButtonVisible(visible);
+  },
+  onRewardsShown: () => {
+    rewardsController.maybeSyncPromoTweetFromBackend();
+  },
+});
+
+/**
+ * Forces win state for local debug flow
+ */
+function triggerDebugVictory() {
+  if (!isDebugToolsEnabled()) {
+    return;
+  }
+  if (STATE.mode !== "playing") {
+    return;
+  }
+
+  for (const pellet of STATE.pellets) {
+    pellet.eaten = true;
+  }
+  STATE.pelletsLeft = 0;
+  STATE.runStats.pelletsEaten = 233;
+  STATE.runStats.powerPelletsEaten = 5;
+  if (STATE.runStats.enemiesEaten < 2) {
+    STATE.runStats.enemiesEaten = 2;
+  }
+  STATE.score = Math.max(STATE.score, DEFAULT_DEBUG_WIN_SCORE);
+  STATE.mode = "won";
+  rewardsController.queueSessionEvent("run_won", {
+    source: "debug_button",
+    finalScore: STATE.score,
+    durationMs: rewardsController.getRunElapsedMs(),
+  });
+  setClaimStatus("Debug victory enabled: submit reward claim");
+  overlayUi.showOverlay({
+    mode: STATE.mode,
+    title: "FPOM Wins",
+    buttonLabel: "Play Again",
+    score: STATE.score,
+  });
+}
+
+// ------------------------------------------------------------
+// World initialization and entity factories
+// ------------------------------------------------------------
+
+/**
+ * Builds maze pellets and remaining pellet counter from template
+ */
 function initMaze() {
   STATE.pellets = [];
   STATE.pelletsLeft = 0;
@@ -92,7 +362,12 @@ function initMaze() {
     for (let col = 0; col < MAZE_COLS; col += 1) {
       const ch = STATE.maze[row][col];
       if (ch === "." || ch === "*") {
-        const forcePower = row === 13 && col === 14;
+        const forcedPowerPellet = GAME_VARIANT.forcePowerPellet;
+        const forcePower = Boolean(
+          forcedPowerPellet &&
+            row === forcedPowerPellet.row &&
+            col === forcedPowerPellet.col,
+        );
         STATE.pellets.push({
           row,
           col,
@@ -105,6 +380,9 @@ function initMaze() {
   }
 }
 
+/**
+ * Returns pixel center for a given tile coordinate
+ */
 function tileCenter(col, row) {
   return {
     x: MAZE_OFFSET_X + col * TILE + TILE / 2,
@@ -112,29 +390,29 @@ function tileCenter(col, row) {
   };
 }
 
+/**
+ * Creates initial player entity
+ */
 function createPlayer() {
-  const spawn = tileCenter(14, 13);
+  const spawnPoint = GAME_VARIANT.playerSpawn;
+  const spawn = tileCenter(spawnPoint.col, spawnPoint.row);
   return {
     x: spawn.x,
     y: spawn.y,
     r: 13,
     speed: 128,
-    dir: "left",
-    desiredDir: "left",
+    dir: spawnPoint.dir,
+    desiredDir: spawnPoint.dir,
     mouthPhase: 0,
     alive: true,
   };
 }
 
+/**
+ * Creates enemy entity by type and spawn index
+ */
 function createEnemy(type, idx) {
-  const spawnPoints = [
-    { col: 13, row: 8, dir: "left" },
-    { col: 14, row: 8, dir: "right" },
-    { col: 12, row: 9, dir: "up" },
-    { col: 15, row: 9, dir: "down" },
-    { col: 11, row: 10, dir: "right" },
-    { col: 16, row: 10, dir: "left" },
-  ];
+  const spawnPoints = GAME_VARIANT.enemySpawnPoints;
   const point = spawnPoints[idx] ?? spawnPoints[0];
   const spawn = tileCenter(point.col, point.row);
   return {
@@ -150,14 +428,20 @@ function createEnemy(type, idx) {
   };
 }
 
+/**
+ * Resets player and enemy entities to spawn state
+ */
 function resetEntities() {
   STATE.player = createPlayer();
-  STATE.enemies = enemyTypes.map((type, i) => createEnemy(type, i));
+  STATE.enemies = GAME_VARIANT.enemyTypes.map((type, i) => createEnemy(type, i));
   STATE.powerTimer = 0;
   STATE.combo = 0;
   STATE.roundResetTimer = 0;
 }
 
+/**
+ * Starts a fresh run and resets score and runtime flags
+ */
 function startNewGame() {
   STATE.mode = "playing";
   STATE.score = 0;
@@ -165,10 +449,21 @@ function startNewGame() {
   STATE.elapsed = 0;
   STATE.paused = false;
   STATE.effects = [];
+  STATE.runStats.startedAtMs = performance.now();
+  STATE.runStats.pelletsEaten = 0;
+  STATE.runStats.powerPelletsEaten = 0;
+  STATE.runStats.enemiesEaten = 0;
+  rewardsController.resetRunState();
   STATE.maze = MAZE_TEMPLATE.map((row) => row.split(""));
   initMaze();
   resetEntities();
-  hideOverlay();
+  rewardsController.queueSessionEvent("run_started", {
+    lives: STATE.lives,
+    pelletsLeft: STATE.pelletsLeft,
+  });
+  setClaimStatus("");
+  walletUi.closeWalletModal();
+  overlayUi.hideOverlay();
   ensureAudioContext();
   if (audioCtx?.state === "suspended") {
     audioCtx.resume().catch(() => {});
@@ -176,26 +471,20 @@ function startNewGame() {
   playTone(460, 0.09, "triangle", 0.04);
 }
 
+/**
+ * Resets entities after losing a life while keeping score
+ */
 function resetRound() {
   resetEntities();
 }
 
-function hideOverlay() {
-  menuOverlay.style.display = "none";
-}
+// ------------------------------------------------------------
+// Audio helpers
+// ------------------------------------------------------------
 
-function showOverlay(text, buttonLabel) {
-  menuOverlay.style.display = "grid";
-  const title = menuOverlay.querySelector("h1");
-  const subtitle = menuOverlay.querySelector(".subtitle");
-  title.textContent = text;
-  subtitle.textContent =
-    STATE.mode === "won"
-      ? "Delusion-fueled momentum complete. Press start for another run."
-      : "FPOM got rugged by memes. Press start to run it back.";
-  startButton.textContent = buttonLabel;
-}
-
+/**
+ * Initializes shared audio context lazily
+ */
 function ensureAudioContext() {
   if (audioCtx) {
     return;
@@ -207,6 +496,9 @@ function ensureAudioContext() {
   audioCtx = new AudioContext();
 }
 
+/**
+ * Plays short procedural retro tone
+ */
 function playTone(freq, duration = 0.08, type = "square", volume = 0.05) {
   if (!audioCtx || audioCtx.state === "suspended") {
     return;
@@ -224,6 +516,13 @@ function playTone(freq, duration = 0.08, type = "square", volume = 0.05) {
   osc.stop(now + duration);
 }
 
+// ------------------------------------------------------------
+// Movement, collision and gameplay update loop
+// ------------------------------------------------------------
+
+/**
+ * Converts world pixel coordinate to maze tile coordinate
+ */
 function worldToTile(x, y) {
   return {
     col: Math.floor((x - MAZE_OFFSET_X) / TILE),
@@ -231,6 +530,9 @@ function worldToTile(x, y) {
   };
 }
 
+/**
+ * Checks whether tile coordinate is blocked by wall
+ */
 function tileIsWall(col, row) {
   if (col < 0 || row < 0 || col >= MAZE_COLS || row >= MAZE_ROWS) {
     return true;
@@ -238,6 +540,9 @@ function tileIsWall(col, row) {
   return STATE.maze[row][col] === "#";
 }
 
+/**
+ * Checks whether entity is close to tile center point
+ */
 function isNearCenter(entity, tolerance = 2.1) {
   const tile = worldToTile(entity.x, entity.y);
   const center = tileCenter(tile.col, tile.row);
@@ -247,6 +552,9 @@ function isNearCenter(entity, tolerance = 2.1) {
   );
 }
 
+/**
+ * Checks whether entity can move in direction without hitting walls
+ */
 function canMove(entity, dir) {
   const vec = DIRS[dir];
   const step = 4;
@@ -264,6 +572,9 @@ function canMove(entity, dir) {
   return checks.every((tile) => !tileIsWall(tile.col, tile.row));
 }
 
+/**
+ * Snaps entity position to nearest tile center
+ */
 function snapToGrid(entity) {
   const tile = worldToTile(entity.x, entity.y);
   const center = tileCenter(tile.col, tile.row);
@@ -271,6 +582,9 @@ function snapToGrid(entity) {
   entity.y = center.y;
 }
 
+/**
+ * Tries to switch player to desired direction
+ */
 function tryApplyDesiredDirection(forceSnap = false) {
   const player = STATE.player;
   if (!forceSnap && player.desiredDir === player.dir) {
@@ -287,6 +601,9 @@ function tryApplyDesiredDirection(forceSnap = false) {
   return false;
 }
 
+/**
+ * Updates player movement and desired direction application
+ */
 function updatePlayer(dt) {
   const player = STATE.player;
   if (!player.alive) return;
@@ -308,6 +625,9 @@ function updatePlayer(dt) {
   player.mouthPhase += dt * 12;
 }
 
+/**
+ * Returns opposite direction key
+ */
 function oppositeDirection(dir) {
   if (dir === "left") return "right";
   if (dir === "right") return "left";
@@ -315,6 +635,9 @@ function oppositeDirection(dir) {
   return "up";
 }
 
+/**
+ * Updates enemy AI movement and direction changes
+ */
 function updateEnemy(enemy, dt) {
   if (enemy.respawnTimer > 0) {
     enemy.respawnTimer -= dt;
@@ -368,6 +691,9 @@ function updateEnemy(enemy, dt) {
   enemy.blink += dt;
 }
 
+/**
+ * Spawns sprite shard particles for hit effects
+ */
 function spawnShatterEffect(x, y, radius, spriteKey, amount = 18) {
   const image = images[spriteKey];
   const imgW = image?.naturalWidth || 64;
@@ -398,6 +724,9 @@ function spawnShatterEffect(x, y, radius, spriteKey, amount = 18) {
   }
 }
 
+/**
+ * Advances and prunes active shard effects
+ */
 function updateEffects(dt) {
   for (const e of STATE.effects) {
     e.life -= dt;
@@ -409,8 +738,14 @@ function updateEffects(dt) {
   STATE.effects = STATE.effects.filter((e) => e.life > 0);
 }
 
+/**
+ * Handles pellet and power pellet pickup logic
+ */
 function eatPellets() {
   const player = STATE.player;
+  let pelletsEatenThisTick = 0;
+  let powerPelletsEatenThisTick = 0;
+
   for (const pellet of STATE.pellets) {
     if (pellet.eaten) continue;
     const center = tileCenter(pellet.col, pellet.row);
@@ -419,26 +754,62 @@ function eatPellets() {
       pellet.eaten = true;
       STATE.pelletsLeft -= 1;
       if (pellet.power) {
-        STATE.score += 60;
+        powerPelletsEatenThisTick += 1;
+        STATE.runStats.powerPelletsEaten += 1;
+        STATE.score += SCORE_VALUES.POWER_PELLET;
         STATE.powerTimer = 8;
         STATE.combo = 0;
         playTone(620, 0.08, "triangle", 0.05);
         playTone(860, 0.11, "triangle", 0.045);
       } else {
-        STATE.score += 12;
+        pelletsEatenThisTick += 1;
+        STATE.runStats.pelletsEaten += 1;
+        STATE.score += SCORE_VALUES.PELLET;
         playTone(250, 0.04, "square", 0.02);
       }
     }
   }
 
+  if (pelletsEatenThisTick > 0 || powerPelletsEatenThisTick > 0) {
+    rewardsController.queueSessionEvent("pellet_eaten", {
+      pellets: pelletsEatenThisTick,
+      powerPellets: powerPelletsEatenThisTick,
+      pelletsLeft: STATE.pelletsLeft,
+    });
+  }
+
   if (STATE.pelletsLeft <= 0) {
+    STATE.score += SCORE_VALUES.ROUND_CLEAR_BONUS;
     STATE.mode = "won";
-    showOverlay("FPOM Wins", "Play Again");
+    rewardsController.queueSessionEvent("run_won", {
+      finalScore: STATE.score,
+      durationMs: rewardsController.getRunElapsedMs(),
+      pelletsEaten: STATE.runStats.pelletsEaten,
+      powerPelletsEaten: STATE.runStats.powerPelletsEaten,
+      enemiesEaten: STATE.runStats.enemiesEaten,
+      telemetryOverflow: STATE.rewards.eventOverflow,
+    });
+    if (!STATE.rewards.apiBase) {
+      setClaimStatus("Rewards API is not configured for this host");
+    } else if (isValidMassaAddress(STATE.rewards.connectedAddress || "")) {
+      setClaimStatus("Add X profile and claim your FPOM");
+    } else {
+      setClaimStatus("Connect wallet, add X profile, and claim your FPOM");
+    }
+    overlayUi.showOverlay({
+      mode: STATE.mode,
+      title: "FPOM Wins",
+      buttonLabel: "Play Again",
+      score: STATE.score,
+    });
     playTone(840, 0.1, "sawtooth", 0.06);
     playTone(1040, 0.15, "triangle", 0.05);
   }
 }
 
+/**
+ * Handles collisions between player and enemies
+ */
 function handleEnemyCollisions() {
   const player = STATE.player;
   if (!player.alive) return;
@@ -451,21 +822,38 @@ function handleEnemyCollisions() {
     if (STATE.powerTimer > 0) {
       spawnShatterEffect(enemy.x, enemy.y, enemy.r * 2.2, enemy.type, 14);
       enemy.respawnTimer = 2.8;
-      const spawn = tileCenter(14, 9);
+      const spawn = tileCenter(GAME_VARIANT.enemyRespawn.col, GAME_VARIANT.enemyRespawn.row);
       enemy.x = spawn.x;
       enemy.y = spawn.y;
+      STATE.runStats.enemiesEaten += 1;
       STATE.combo += 1;
-      STATE.score += 150 + STATE.combo * 50;
+      STATE.score += SCORE_VALUES.ENEMY_BASE + STATE.combo * SCORE_VALUES.ENEMY_COMBO_STEP;
+      rewardsController.queueSessionEvent("enemy_eaten", {
+        enemyType: enemy.type,
+        combo: STATE.combo,
+      });
       playTone(700, 0.06, "square", 0.04);
       playTone(920, 0.08, "triangle", 0.035);
     } else {
       spawnShatterEffect(player.x, player.y, player.r * 2.4, "fpom", 24);
       player.alive = false;
       STATE.lives -= 1;
+      rewardsController.queueSessionEvent("life_lost", {
+        livesLeft: STATE.lives,
+      });
       playTone(180, 0.22, "sawtooth", 0.05);
       if (STATE.lives <= 0) {
         STATE.mode = "gameover";
-        showOverlay("Game Over", "Try Again");
+        rewardsController.queueSessionEvent("run_lost", {
+          finalScore: STATE.score,
+          durationMs: rewardsController.getRunElapsedMs(),
+        });
+        overlayUi.showOverlay({
+          mode: STATE.mode,
+          title: "Game Over",
+          buttonLabel: "Try Again",
+          score: STATE.score,
+        });
       } else {
         STATE.roundResetTimer = 0.95;
       }
@@ -474,6 +862,11 @@ function handleEnemyCollisions() {
   }
 }
 
+/**
+ * Fixed-step gameplay update
+ *
+ * @param {number} dt Delta time in seconds
+ */
 function update(dt) {
   if (STATE.mode !== "playing" || STATE.paused) {
     updateEffects(dt);
@@ -504,246 +897,33 @@ function update(dt) {
   handleEnemyCollisions();
 }
 
-function drawMazeBackground() {
-  const gradient = ctx.createLinearGradient(0, MAZE_OFFSET_Y, 0, MAZE_OFFSET_Y + MAZE_HEIGHT);
-  gradient.addColorStop(0, "#170f29");
-  gradient.addColorStop(1, "#29173b");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(MAZE_OFFSET_X, MAZE_OFFSET_Y, MAZE_WIDTH, MAZE_HEIGHT);
+// ------------------------------------------------------------
+// Rendering and frame stepping
+// ------------------------------------------------------------
 
-  ctx.save();
-  ctx.globalAlpha = 0.1;
-  for (let row = 0; row < MAZE_ROWS; row += 1) {
-    const y = MAZE_OFFSET_Y + row * TILE;
-    ctx.fillStyle = row % 2 === 0 ? "#ffd7a0" : "#ffffff";
-    ctx.fillRect(MAZE_OFFSET_X, y, MAZE_WIDTH, 2);
-  }
-  ctx.restore();
-}
-
-function drawWalls() {
-  for (let row = 0; row < MAZE_ROWS; row += 1) {
-    for (let col = 0; col < MAZE_COLS; col += 1) {
-      if (STATE.maze[row][col] !== "#") continue;
-      const x = MAZE_OFFSET_X + col * TILE;
-      const y = MAZE_OFFSET_Y + row * TILE;
-
-      const wallGradient = ctx.createLinearGradient(x, y, x + TILE, y + TILE);
-      wallGradient.addColorStop(0, "#2e6df7");
-      wallGradient.addColorStop(1, "#51e8ff");
-      ctx.fillStyle = wallGradient;
-      ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x + 3, y + 3, TILE - 6, TILE - 6);
-    }
-  }
-}
-
-function drawPellets() {
-  for (const pellet of STATE.pellets) {
-    if (pellet.eaten) continue;
-    const c = tileCenter(pellet.col, pellet.row);
-    const pulse = 0.75 + Math.sin(STATE.elapsed * 5 + pellet.col) * 0.2;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, pellet.power ? 7 * pulse : 3.4, 0, Math.PI * 2);
-    ctx.fillStyle = pellet.power ? "#ff6f6f" : "#ffd773";
-    ctx.fill();
-  }
-}
-
-function applyDirectionalTransform(dir) {
-  if (dir === "left") {
-    ctx.scale(-1, 1);
-    return;
-  }
-  if (dir === "down") {
-    ctx.rotate(Math.PI / 2);
-    return;
-  }
-  if (dir === "up") {
-    ctx.rotate(Math.PI / 2);
-    ctx.scale(-1, 1);
-  }
-}
-
-function drawPlayer() {
-  const p = STATE.player;
-  const facing = p.dir === "left" ? Math.PI : p.dir === "up" ? -Math.PI / 2 : p.dir === "down" ? Math.PI / 2 : 0;
-  const mouth = 0.24 + Math.abs(Math.sin(p.mouthPhase)) * 0.2;
-
-  ctx.save();
-  ctx.translate(p.x, p.y);
-
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.arc(0, 0, p.r + 2, facing + mouth, facing - mouth, false);
-  ctx.closePath();
-  ctx.clip();
-
-  const glow = STATE.powerTimer > 0 ? 8 : 3;
-  ctx.shadowColor = STATE.powerTimer > 0 ? "#ff4444" : "#fff3b0";
-  ctx.shadowBlur = glow;
-  applyDirectionalTransform(p.dir);
-  ctx.drawImage(images.fpom, -(p.r + 4), -(p.r + 4), (p.r + 4) * 2, (p.r + 4) * 2);
-
-  ctx.restore();
-
-  if (STATE.powerTimer > 0) {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r + 5 + Math.sin(STATE.elapsed * 10) * 1.5, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(255, 70, 70, 0.5)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-}
-
-function drawEnemy(enemy) {
-  if (enemy.respawnTimer > 0) {
-    return;
-  }
-
-  const size = enemy.r * 2.3;
-  ctx.save();
-  ctx.translate(enemy.x, enemy.y);
-
-  if (STATE.powerTimer > 0) {
-    const blink = Math.sin(enemy.blink * 16) > 0 ? 0.55 : 0.25;
-    ctx.fillStyle = `rgba(20, 120, 255, ${blink})`;
-    ctx.beginPath();
-    ctx.arc(0, 0, enemy.r + 6, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const img = images[enemy.type];
-  if (img.complete) {
-    applyDirectionalTransform(enemy.dir);
-    if (enemy.type === "pepe") {
-      ctx.beginPath();
-      ctx.arc(0, 0, enemy.r + 0.5, 0, Math.PI * 2);
-      ctx.clip();
-    }
-    ctx.drawImage(img, -size / 2, -size / 2, size, size);
-  } else {
-    ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.arc(0, 0, enemy.r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.restore();
-}
-
-function drawEffects() {
-  for (const e of STATE.effects) {
-    const alpha = Math.max(0, Math.min(1, e.life / e.maxLife));
-    const img = images[e.spriteKey];
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    ctx.rotate(e.rotation);
-    ctx.globalAlpha = alpha;
-    if (img?.complete) {
-      ctx.drawImage(
-        img,
-        e.srcX,
-        e.srcY,
-        e.srcSize,
-        e.srcSize,
-        -e.size / 2,
-        -e.size / 2,
-        e.size,
-        e.size,
-      );
-    } else {
-      ctx.fillStyle = "rgba(255, 120, 120, 0.85)";
-      ctx.fillRect(-e.size / 2, -e.size / 2, e.size, e.size);
-    }
-    ctx.restore();
-  }
-}
-
-function drawHud() {
-  ctx.fillStyle = "#fff7e0";
-  ctx.font = '16px "Press Start 2P", monospace';
-  ctx.fillText(`Score ${STATE.score}`, 22, 28);
-  ctx.fillText(`Lives ${STATE.lives}`, 22, 54);
-
-  if (STATE.powerTimer > 0) {
-    ctx.fillStyle = "#ff9d9d";
-    ctx.fillText(`HUNT ${STATE.powerTimer.toFixed(1)}s`, BASE_WIDTH - 290, 28);
-  }
-
-  if (STATE.paused && STATE.mode === "playing") {
-    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
-    ctx.fillStyle = "#fff";
-    ctx.font = '22px "Bungee", sans-serif';
-    ctx.fillText("PAUSED", BASE_WIDTH / 2 - 78, BASE_HEIGHT / 2);
-  }
-}
-
-function drawModeBanner() {
-  if (STATE.mode === "playing") {
-    return;
-  }
-
-  const cardW = 760;
-  const cardH = 280;
-  const x = (BASE_WIDTH - cardW) / 2;
-  const y = (BASE_HEIGHT - cardH) / 2;
-
-  ctx.fillStyle = "rgba(9, 6, 25, 0.7)";
-  ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
-
-  ctx.fillStyle = "rgba(255, 245, 225, 0.95)";
-  ctx.fillRect(x, y, cardW, cardH);
-  ctx.strokeStyle = "#ff4f34";
-  ctx.lineWidth = 4;
-  ctx.strokeRect(x + 2, y + 2, cardW - 4, cardH - 4);
-
-  let title = "FPOM Meme Hunt";
-  if (STATE.mode === "gameover") title = "Game Over";
-  if (STATE.mode === "won") title = "FPOM Wins";
-
-  ctx.fillStyle = "#5a1208";
-  ctx.font = '44px "Bungee", sans-serif';
-  ctx.fillText(title, x + 72, y + 74);
-
-  ctx.fillStyle = "#2f1a15";
-  ctx.font = '12px "Press Start 2P", monospace';
-  ctx.fillText("No more scams. Gimme a serious fake.", x + 70, y + 112);
-  ctx.fillText("Move: WASD / Arrows  |  F: fullscreen  |  P: pause", x + 70, y + 148);
-  ctx.fillText("Collect memes. Eat red orb to hunt Doge, Shiba, Pepe.", x + 70, y + 176);
-  ctx.fillText("Press Enter / Space or click Start Hunt", x + 70, y + 218);
-}
-
+/**
+ * Renders current frame on game canvas
+ */
 function render() {
-  ctx.clearRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
-
-  const bg = ctx.createLinearGradient(0, 0, BASE_WIDTH, BASE_HEIGHT);
-  bg.addColorStop(0, "#260f31");
-  bg.addColorStop(1, "#3d1731");
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
-
-  drawMazeBackground();
-  drawWalls();
-  drawPellets();
-
-  for (const enemy of STATE.enemies) {
-    drawEnemy(enemy);
-  }
-
-  if (STATE.player) {
-    drawPlayer();
-  }
-  drawEffects();
-
-  drawHud();
-  drawModeBanner();
+  renderScene({
+    ctx,
+    state: STATE,
+    images,
+    baseWidth: BASE_WIDTH,
+    baseHeight: BASE_HEIGHT,
+    tile: TILE,
+    mazeRows: MAZE_ROWS,
+    mazeCols: MAZE_COLS,
+    mazeWidth: MAZE_WIDTH,
+    mazeHeight: MAZE_HEIGHT,
+    mazeOffsetX: MAZE_OFFSET_X,
+    mazeOffsetY: MAZE_OFFSET_Y,
+  });
 }
 
+/**
+ * RAF loop with fixed timestep accumulator
+ */
 function gameLoop(ts) {
   if (!lastTs) {
     lastTs = ts;
@@ -762,6 +942,11 @@ function gameLoop(ts) {
   animationFrame = requestAnimationFrame(gameLoop);
 }
 
+/**
+ * Deterministic stepping hook used by Playwright automation
+ *
+ * @param {number} ms Virtual milliseconds to advance
+ */
 function advanceTime(ms) {
   const steps = Math.max(1, Math.round(ms / (FIXED_DT * 1000)));
   for (let i = 0; i < steps; i += 1) {
@@ -770,6 +955,11 @@ function advanceTime(ms) {
   render();
 }
 
+/**
+ * Debug/state serialization used by automated testing tools
+ *
+ * @returns {string}
+ */
 function renderGameToText() {
   const player = STATE.player
     ? {
@@ -807,19 +997,43 @@ function renderGameToText() {
     effects_count: STATE.effects.length,
     round_reset_timer: Number(STATE.roundResetTimer.toFixed(2)),
     sample_active_pellets: activePellets,
+    maze_rows: MAZE_ROWS,
+    maze_cols: MAZE_COLS,
+    game_variant: GAME_VARIANT.id,
   });
 }
 
+// ------------------------------------------------------------
+// Input / claim actions
+// ------------------------------------------------------------
+
+/**
+ * Applies directional input to player desired direction
+ */
 function handleDirectionInput(dir) {
   if (!STATE.player) return;
+  if (STATE.player.desiredDir !== dir) {
+    rewardsController.queueSessionEvent("input_direction", {
+      dir,
+    });
+  }
   STATE.player.desiredDir = dir;
 }
 
+/**
+ * Toggles pause mode during active run
+ */
 function togglePause() {
   if (STATE.mode !== "playing") return;
   STATE.paused = !STATE.paused;
+  rewardsController.queueSessionEvent("pause_toggled", {
+    paused: STATE.paused,
+  });
 }
 
+/**
+ * Toggles browser fullscreen mode
+ */
 async function toggleFullscreen() {
   if (!document.fullscreenElement) {
     await document.documentElement.requestFullscreen();
@@ -828,9 +1042,43 @@ async function toggleFullscreen() {
   }
 }
 
+/**
+ * Reads reward claim form values from UI
+ */
+function readClaimForm() {
+  const xProfile = xProfileInput ? xProfileInput.value.trim() : "";
+  return { xProfile };
+}
+
+/**
+ * Checks whether target element is text-editable
+ */
+function isTextInputElement(element) {
+  if (!element) {
+    return false;
+  }
+  const tagName = element.tagName ? element.tagName.toUpperCase() : "";
+  if (tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT") {
+    return true;
+  }
+  return Boolean(element.isContentEditable);
+}
+
+/**
+ * Handles keyboard keydown events for gameplay and UI
+ */
 function onKeyDown(event) {
   const { code } = event;
   keysPressed.add(code);
+  const isTypingTarget = isTextInputElement(event.target);
+  const isWalletModalOpen = Boolean(walletModal && !walletModal.hidden);
+
+  if (isWalletModalOpen) {
+    if (code === "Escape") {
+      walletUi.closeWalletModal();
+    }
+    return;
+  }
 
   if (code === "Enter" || code === "Space") {
     if (STATE.mode === "title" || STATE.mode === "gameover" || STATE.mode === "won") {
@@ -845,6 +1093,9 @@ function onKeyDown(event) {
   }
 
   if (code === "KeyF") {
+    if (isTypingTarget) {
+      return;
+    }
     toggleFullscreen().catch(() => {});
     return;
   }
@@ -855,14 +1106,49 @@ function onKeyDown(event) {
   if (code === "ArrowDown" || code === "KeyS") handleDirectionInput("down");
 }
 
+/**
+ * Handles keyboard keyup events
+ */
 function onKeyUp(event) {
   keysPressed.delete(event.code);
 }
 
+/**
+ * Registers DOM and input event listeners
+ */
 function setupEvents() {
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
   startButton.addEventListener("click", () => startNewGame());
+  if (claimButton) {
+    claimButton.addEventListener("click", () => {
+      rewardsController.submitRewardClaim(readClaimForm()).catch(() => {});
+    });
+  }
+  if (topWalletButton) {
+    topWalletButton.addEventListener("click", () => {
+      walletUi.openWalletModal().catch(() => {
+        setClaimStatus("Failed to open wallet selector");
+      });
+    });
+  }
+  if (walletModalClose) {
+    walletModalClose.addEventListener("click", () => {
+      walletUi.closeWalletModal();
+    });
+  }
+  if (walletModal) {
+    walletModal.addEventListener("click", (event) => {
+      if (event.target === walletModal) {
+        walletUi.closeWalletModal();
+      }
+    });
+  }
+  if (devWinButton) {
+    devWinButton.addEventListener("click", () => {
+      triggerDebugVictory();
+    });
+  }
 
   document.addEventListener("fullscreenchange", () => {
     if (!document.fullscreenElement) {
@@ -878,13 +1164,32 @@ function setupEvents() {
   });
 }
 
+/**
+ * App entry point
+ */
 function init() {
+  rewardsController.applyRuntimeConfig();
   initMaze();
   resetEntities();
   setupEvents();
+  if (devWinButton) {
+    devWinButton.hidden = !isDebugToolsEnabled();
+  }
+  if (rewardPanel) {
+    rewardPanel.hidden = true;
+  }
+  walletUi.setTopWalletButtonVisible(true);
+  walletUi.updateTopWalletButton();
+  walletUi.updateWalletStatusForClaimPanel();
+  setClaimControlsDisabled(false);
+  if (STATE.rewards.apiBase) {
+    setClaimStatus(`Rewards API: ${STATE.rewards.apiBase}`);
+  } else {
+    setClaimStatus("Rewards API is not configured");
+  }
   window.render_game_to_text = renderGameToText;
   window.advanceTime = advanceTime;
-  window.__fpom_game = { state: STATE };
+  window.__fpom_game = { state: STATE, walletUi, rewardsController, gameVariant: GAME_VARIANT.id };
   render();
 
   if (animationFrame) {
