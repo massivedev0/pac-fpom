@@ -187,7 +187,7 @@ function detectLegacyWalletProviders() {
     });
   }
 
-  const bearbyProvider = window.bearby || window.bearbyWallet || window.web3?.wallet || window.web3 || null;
+  const bearbyProvider = detectLegacyBearbyProvider();
   if (bearbyProvider) {
     candidates.push({
       id: "legacy:bearby",
@@ -198,6 +198,65 @@ function detectLegacyWalletProviders() {
   }
 
   return candidates;
+}
+
+/**
+ * Detects explicit Bearby legacy injections without falling back to generic web3 providers
+ *
+ * @returns {any | null} Bearby provider object
+ */
+function detectLegacyBearbyProvider() {
+  const directCandidates = [
+    window.bearby,
+    window.bearbyWallet,
+    window?.web3?.wallet,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (isBearbyProvider(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Checks whether an injected provider looks like Bearby instead of a generic wallet shim
+ *
+ * @param {any} provider Candidate injected provider
+ * @returns {boolean} True when provider exposes Bearby-specific markers
+ */
+function isBearbyProvider(provider) {
+  if (!provider || typeof provider !== "object") {
+    return false;
+  }
+
+  if (provider.isBearby === true || provider.__isBearby === true) {
+    return true;
+  }
+
+  const providerName = String(
+    provider.name ||
+      provider.walletName ||
+      provider.providerName ||
+      provider.constructor?.name ||
+      "",
+  ).toLowerCase();
+  if (providerName.includes("bearby")) {
+    return true;
+  }
+
+  const accountAddress = String(
+    provider.account?.base58 ||
+      provider.wallet?.account?.base58 ||
+      "",
+  ).trim();
+  if (accountAddress.startsWith("AU")) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
