@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" type="image/png" href="./assets/fpom/fpom-logo-transparent.png" />
     <title>FPOM Meme Hunt</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -15,7 +15,7 @@
   </head>
   <body>
     <main class="layout">
-      <section class="game-shell" aria-label="FPOM game shell">
+      <section id="game-shell" class="game-shell" aria-label="FPOM game shell">
         <canvas id="game-canvas" width="960" height="640"></canvas>
         <button id="top-wallet-btn" class="top-wallet-btn" type="button">Connect Wallet</button>
         <button id="dev-win-btn" class="dev-win-btn" type="button" hidden>Victory</button>
@@ -62,6 +62,12 @@
         </div>
       </section>
     </main>
+    <div id="mobile-rotate-overlay" class="mobile-rotate-overlay" hidden>
+      <div class="mobile-rotate-card" role="status" aria-live="polite">
+        <h2>Rotate to Landscape</h2>
+        <p>FPOM Meme Hunt is tuned for landscape on mobile. Turn your phone sideways, then swipe to move.</p>
+      </div>
+    </div>
 
     <script type="module" src="./src/game.js"></script>
   </body>

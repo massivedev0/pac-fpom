@@ -16,9 +16,11 @@ import { discoverWalletCandidates, getCandidateAccounts, resetWalletCandidate } 
 import { createWalletUiController } from "./modules/wallet-ui.js";
 import { createRewardsController } from "./modules/rewards-controller.js";
 import { createOverlayUiController } from "./modules/overlay-ui.js";
+import { createMobileRuntimeController } from "./modules/mobile-runtime.js";
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
+const gameShell = document.getElementById("game-shell");
 const startButton = document.getElementById("start-btn");
 const menuOverlay = document.getElementById("menu-overlay");
 const topWalletButton = document.getElementById("top-wallet-btn");
@@ -34,6 +36,7 @@ const walletStatus = document.getElementById("wallet-status");
 const claimButton = document.getElementById("claim-btn");
 const claimStatus = document.getElementById("claim-status");
 const devWinButton = document.getElementById("dev-win-btn");
+const mobileRotateOverlay = document.getElementById("mobile-rotate-overlay");
 
 /**
  * Checks whether current host is local-only
@@ -102,6 +105,15 @@ const STATE = {
     pelletsEaten: 0,
     powerPelletsEaten: 0,
     enemiesEaten: 0,
+  },
+  runtime: {
+    isMobile: false,
+    isLandscape: true,
+    rotateNoticeVisible: false,
+    controlsHintHtml: "Move: WASD / Arrows · Power hunt: eat red orbs<br />F: fullscreen · P: pause",
+    controlsBannerPrimary: "Move: WASD / Arrows  |  Power hunt: eat red orbs",
+    controlsBannerSecondary: "F: fullscreen  |  P: pause",
+    controlsBannerStart: "Press Enter / Space or click Start Hunt",
   },
   rewards: {
     apiBase: "",
@@ -172,6 +184,17 @@ function applyPromoTweetUrl(url) {
     promoTweetLink.href = normalized;
     promoTweetLink.textContent = normalized;
   }
+}
+
+/**
+ * Syncs menu hint copy with current runtime mode
+ */
+function syncControlsHint() {
+  const hintNode = menuOverlay?.querySelector(".hint");
+  if (!hintNode) {
+    return;
+  }
+  hintNode.innerHTML = STATE.runtime.controlsHintHtml;
 }
 
 /**
@@ -312,6 +335,24 @@ const overlayUi = createOverlayUiController({
 });
 
 /**
+ * Mobile layout/orientation/swipe controller
+ */
+const mobileRuntime = createMobileRuntimeController({
+  body: document.body,
+  gameShell,
+  canvas,
+  rotateOverlay: mobileRotateOverlay,
+  runtimeState: STATE.runtime,
+  baseWidth: BASE_WIDTH,
+  baseHeight: BASE_HEIGHT,
+  shouldAcceptSwipe: () => STATE.mode === "playing" && !STATE.paused && (!walletModal || walletModal.hidden),
+  onDirectionInput: handleDirectionInput,
+  onRuntimeStateChange: () => {
+    syncControlsHint();
+  },
+});
+
+/**
  * Forces win state for local debug flow
  */
 function triggerDebugVictory() {
@@ -443,6 +484,7 @@ function resetEntities() {
  * Starts a fresh run and resets score and runtime flags
  */
 function startNewGame() {
+  mobileRuntime.requestLandscapeLock().catch(() => {});
   STATE.mode = "playing";
   STATE.score = 0;
   STATE.lives = 3;
@@ -988,6 +1030,9 @@ function renderGameToText() {
     coordinate_system: "origin top-left; x right; y down; maze tile size 32px",
     mode: STATE.mode,
     paused: STATE.paused,
+    mobile: STATE.runtime.isMobile,
+    landscape: STATE.runtime.isLandscape,
+    rotate_notice_visible: STATE.runtime.rotateNoticeVisible,
     score: STATE.score,
     lives: STATE.lives,
     power_timer: Number(STATE.powerTimer.toFixed(2)),
@@ -1035,6 +1080,9 @@ function togglePause() {
  * Toggles browser fullscreen mode
  */
 async function toggleFullscreen() {
+  if (mobileRuntime.isMobileRuntime()) {
+    return;
+  }
   if (!document.fullscreenElement) {
     await document.documentElement.requestFullscreen();
   } else {
@@ -1093,7 +1141,7 @@ function onKeyDown(event) {
   }
 
   if (code === "KeyF") {
-    if (isTypingTarget) {
+    if (isTypingTarget || mobileRuntime.isMobileRuntime()) {
       return;
     }
     toggleFullscreen().catch(() => {});
@@ -1117,6 +1165,7 @@ function onKeyUp(event) {
  * Registers DOM and input event listeners
  */
 function setupEvents() {
+  mobileRuntime.installEventListeners();
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
   startButton.addEventListener("click", () => startNewGame());
@@ -1151,12 +1200,11 @@ function setupEvents() {
   }
 
   document.addEventListener("fullscreenchange", () => {
-    if (!document.fullscreenElement) {
-      canvas.style.width = "min(96vw, 960px)";
-    }
+    mobileRuntime.applyLayout();
   });
 
   menuOverlay.addEventListener("click", () => {
+    mobileRuntime.requestLandscapeLock().catch(() => {});
     ensureAudioContext();
     if (audioCtx?.state === "suspended") {
       audioCtx.resume().catch(() => {});
@@ -1172,6 +1220,9 @@ function init() {
   initMaze();
   resetEntities();
   setupEvents();
+  mobileRuntime.applyLayout();
+  mobileRuntime.requestLandscapeLock().catch(() => {});
+  syncControlsHint();
   if (devWinButton) {
     devWinButton.hidden = !isDebugToolsEnabled();
   }
@@ -1189,7 +1240,7 @@ function init() {
   }
   window.render_game_to_text = renderGameToText;
   window.advanceTime = advanceTime;
-  window.__fpom_game = { state: STATE, walletUi, rewardsController, gameVariant: GAME_VARIANT.id };
+  window.__fpom_game = { state: STATE, walletUi, rewardsController, mobileRuntime, gameVariant: GAME_VARIANT.id };
   render();
 
   if (animationFrame) {
