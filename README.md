@@ -7,7 +7,6 @@ FPOM Meme Hunt is a lightweight Pac-Man-style browser game built for FPOM promot
 - GitHub Pages: [massivedev0.github.io/pac-fpom](https://massivedev0.github.io/pac-fpom/)
 - Massa DeWeb native MNS: [pac-fpom.massa](http://pac-fpom.massa/)
 - Massa DeWeb redirect gateway: [deweb.massa.network redirect](https://deweb.massa.network/deweb_redirect?chain_id=77658377&deweb_url=pac-fpom.massa)
-- Local DeWeb server variant: [pac-fpom.localhost:8080](http://pac-fpom.localhost:8080/)
 
 ## FPOM Links
 
