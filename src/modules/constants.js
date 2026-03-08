@@ -30,6 +30,19 @@ export const SESSION_EVENTS_BUFFER_LIMIT = 1200;
 export const SESSION_RETRY_DELAY_MS = 2500;
 
 /**
+ * Public FPOM links used in README and title-screen CTA footer
+ * @readonly
+ */
+export const PROJECT_LINKS = Object.freeze({
+  X: "https://x.com/PepeOnMassaFake",
+  DUSA: "https://app.dusa.io/pools/AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib/AS12U4TZfNK7qoLyEERBBRDMu8nm5MKoRzPXDXans4v9wdATZedz9/100/V2",
+  EAGLEFI: "https://www.eaglefi.io/token/AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+  DUSER_PUMP: "https://duser-pump.netlify.app/trade/AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+  X_INTRO_POST: "https://x.com/PepeOnMassaFake/status/1935283435217592782",
+  X_SUMMARY_POST: "https://x.com/PepeOnMassaFake/status/1935284341887684740",
+});
+
+/**
  * Wallet/claim flow defaults
  * @readonly
  */

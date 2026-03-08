@@ -7,6 +7,7 @@ import {
   DEV_TEST_GAME_VARIANT,
   DIRS,
   FIXED_DT,
+  PROJECT_LINKS,
   SCORE_VALUES,
   TILE,
 } from "./modules/constants.js";
@@ -38,6 +39,10 @@ const claimButton = document.getElementById("claim-btn");
 const claimStatus = document.getElementById("claim-status");
 const devWinButton = document.getElementById("dev-win-btn");
 const mobileRotateOverlay = document.getElementById("mobile-rotate-overlay");
+const menuLinkX = document.getElementById("menu-link-x");
+const menuLinkDusa = document.getElementById("menu-link-dusa");
+const menuLinkEagleFi = document.getElementById("menu-link-eaglefi");
+const menuLinkDuserPump = document.getElementById("menu-link-duser-pump");
 
 /**
  * Checks whether current host is local-only
@@ -196,6 +201,24 @@ function syncControlsHint() {
     return;
   }
   hintNode.innerHTML = STATE.runtime.controlsHintHtml;
+}
+
+/**
+ * Populates title-screen project links from shared constants
+ */
+function syncProjectLinks() {
+  if (menuLinkX) {
+    menuLinkX.href = PROJECT_LINKS.X;
+  }
+  if (menuLinkDusa) {
+    menuLinkDusa.href = PROJECT_LINKS.DUSA;
+  }
+  if (menuLinkEagleFi) {
+    menuLinkEagleFi.href = PROJECT_LINKS.EAGLEFI;
+  }
+  if (menuLinkDuserPump) {
+    menuLinkDuserPump.href = PROJECT_LINKS.DUSER_PUMP;
+  }
 }
 
 /**
@@ -1292,6 +1315,7 @@ function init() {
   mobileRuntime.applyLayout();
   mobileRuntime.requestLandscapeLock().catch(() => {});
   syncControlsHint();
+  syncProjectLinks();
   if (devWinButton) {
     devWinButton.hidden = !isDebugToolsEnabled();
   }
