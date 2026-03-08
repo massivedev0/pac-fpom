@@ -49,7 +49,15 @@ cd backend
 npm test
 ```
 
-Test run clears local tables in configured `DATABASE_URL` before each test.
+`npm test` now uses an isolated SQLite database at `backend/prisma/rewards.test.db`.
+It does not touch the working `DATABASE_URL`.
+
+Optional override:
+
+```bash
+cd backend
+TEST_DATABASE_URL="file:/absolute/path/to/rewards.test.db" npm test
+```
 
 Current coverage includes:
 

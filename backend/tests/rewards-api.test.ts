@@ -6,6 +6,13 @@ import { type PayoutSender } from "../src/massa-payout.js";
 import { createApp } from "../src/server.js";
 import { hmacSha256Hex } from "../src/utils.js";
 
+const TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL ||
+  process.env.DATABASE_URL_TEST ||
+  "file:./rewards.test.db";
+
+process.env.DATABASE_URL = TEST_DATABASE_URL;
+
 const BASE_CONFIG: AppConfig = {
   host: "127.0.0.1",
   port: 0,
@@ -49,6 +56,12 @@ type TestContext = {
   cleanup: () => Promise<void>;
 };
 
+/**
+ * Removes all reward tables between test cases
+ *
+ * @param {PrismaClient} prisma Active Prisma client
+ * @returns {Promise<void>}
+ */
 async function clearDatabase(prisma: PrismaClient) {
   await prisma.payoutJob.deleteMany();
   await prisma.auditLog.deleteMany();
@@ -58,10 +71,18 @@ async function clearDatabase(prisma: PrismaClient) {
   await prisma.session.deleteMany();
 }
 
+/**
+ * Creates isolated Fastify + Prisma test context
+ *
+ * @param {Partial<AppConfig>} [configPatch={}] Per-test config overrides
+ * @param {PayoutSender | null} [payoutSender=null] Optional mocked payout sender
+ * @returns {Promise<TestContext>} Ready test context
+ */
 async function createTestContext(
   configPatch: Partial<AppConfig> = {},
   payoutSender: PayoutSender | null = null,
 ): Promise<TestContext> {
+  assert.match(process.env.DATABASE_URL ?? "", /rewards\.test\.db/);
   const prisma = new PrismaClient();
   await clearDatabase(prisma);
 
@@ -85,6 +106,12 @@ async function createTestContext(
   };
 }
 
+/**
+ * Starts a telemetry session for tests
+ *
+ * @param {ReturnType<typeof createApp>} app Fastify app under test
+ * @returns {Promise<{ sessionId: string; nonce: string }>} Created session payload
+ */
 async function startSession(app: ReturnType<typeof createApp>) {
   const response = await app.inject({
     method: "POST",
@@ -96,6 +123,13 @@ async function startSession(app: ReturnType<typeof createApp>) {
   return response.json() as { sessionId: string; nonce: string };
 }
 
+/**
+ * Calls claim prepare endpoint with arbitrary payload
+ *
+ * @param {ReturnType<typeof createApp>} app Fastify app under test
+ * @param {Record<string, unknown>} payload Request body
+ * @returns {Promise<import("light-my-request").Response>} Injected response
+ */
 async function prepareClaim(app: ReturnType<typeof createApp>, payload: Record<string, unknown>) {
   const response = await app.inject({
     method: "POST",
@@ -105,6 +139,13 @@ async function prepareClaim(app: ReturnType<typeof createApp>, payload: Record<s
   return response;
 }
 
+/**
+ * Calls claim confirm endpoint with arbitrary payload
+ *
+ * @param {ReturnType<typeof createApp>} app Fastify app under test
+ * @param {Record<string, unknown>} payload Request body
+ * @returns {Promise<import("light-my-request").Response>} Injected response
+ */
 async function confirmClaim(app: ReturnType<typeof createApp>, payload: Record<string, unknown>) {
   const response = await app.inject({
     method: "POST",
@@ -114,6 +155,14 @@ async function confirmClaim(app: ReturnType<typeof createApp>, payload: Record<s
   return response;
 }
 
+/**
+ * Pushes synthetic telemetry events into a test session
+ *
+ * @param {ReturnType<typeof createApp>} app Fastify app under test
+ * @param {string} sessionId Target session id
+ * @param {number} [count=12] Number of events to create
+ * @returns {Promise<void>}
+ */
 async function pushSessionEvents(
   app: ReturnType<typeof createApp>,
   sessionId: string,
@@ -139,11 +188,24 @@ async function pushSessionEvents(
 
 let xProfileSequence = 0;
 
+/**
+ * Generates unique X profile URL for tests
+ *
+ * @returns {string} Unique X profile URL
+ */
 function nextXProfile(): string {
   xProfileSequence += 1;
   return `https://x.com/fpomplayer${xProfileSequence}`;
 }
 
+/**
+ * Creates a paid claim through prepare + confirm endpoints
+ *
+ * @param {ReturnType<typeof createApp>} app Fastify app under test
+ * @param {string} [address=VALID_ADDRESS] Recipient address
+ * @param {string} [xProfile=nextXProfile()] Unique X profile URL
+ * @returns {Promise<string>} Final claim id
+ */
 async function createPaidClaim(
   app: ReturnType<typeof createApp>,
   address = VALID_ADDRESS,

@@ -21,10 +21,24 @@ export type RunSummary = {
   finalScoreClient: number;
 };
 
+/**
+ * Restricts numeric value to a closed range
+ *
+ * @param {number} value Raw numeric value
+ * @param {number} min Inclusive lower bound
+ * @param {number} max Inclusive upper bound
+ * @returns {number} Clamped numeric value
+ */
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/**
+ * Sanitizes client run summary before server-side scoring
+ *
+ * @param {RunSummary} input Client-provided run summary
+ * @returns {RunSummary} Normalized run summary
+ */
 export function normalizeRunSummary(input: RunSummary): RunSummary {
   return {
     won: Boolean(input.won),
@@ -40,7 +54,12 @@ export function normalizeRunSummary(input: RunSummary): RunSummary {
   };
 }
 
-// MVP formula: conservative and deterministic server-side score calculation.
+/**
+ * Computes authoritative server-side reward score
+ *
+ * @param {RunSummary} input Client-provided run summary
+ * @returns {number} Deterministic server score
+ */
 export function computeServerScore(input: RunSummary): number {
   const s = normalizeRunSummary(input);
   if (!s.won) {

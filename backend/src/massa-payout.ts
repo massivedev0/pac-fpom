@@ -60,18 +60,43 @@ type MassaRuntime = {
   decimals: number;
 };
 
+/**
+ * Converts Massa web3 enum value into readable label
+ *
+ * @param {OperationStatus} status Raw operation status
+ * @returns {string} Human-readable status label
+ */
 function mapOperationStatusLabel(status: OperationStatus): string {
   return OperationStatus[status] ?? `UNKNOWN_${status}`;
 }
 
+/**
+ * Checks whether observed operation status is final success
+ *
+ * @param {OperationStatus} status Raw operation status
+ * @returns {boolean} True when operation fully succeeded
+ */
 function isFinalSuccessStatus(status: OperationStatus): boolean {
   return status === OperationStatus.Success;
 }
 
+/**
+ * Checks whether observed operation status is terminal failure
+ *
+ * @param {OperationStatus} status Raw operation status
+ * @returns {boolean} True when operation failed
+ */
 function isFailureStatus(status: OperationStatus): boolean {
   return status === OperationStatus.SpeculativeError || status === OperationStatus.Error;
 }
 
+/**
+ * Converts integer token amount into raw on-chain units
+ *
+ * @param {number} amountTokens Whole-token amount
+ * @param {number} decimals Token decimals
+ * @returns {bigint} Raw token amount
+ */
 function toRawTokenAmount(amountTokens: number, decimals: number): bigint {
   if (!Number.isSafeInteger(amountTokens) || amountTokens <= 0) {
     throw new Error(`invalid_reward_amount:${amountTokens}`);
@@ -82,6 +107,13 @@ function toRawTokenAmount(amountTokens: number, decimals: number): bigint {
   return BigInt(amountTokens) * 10n ** BigInt(decimals);
 }
 
+/**
+ * Creates payout sender backed by Massa JSON-RPC and MRC20 transfer
+ *
+ * @param {AppConfig} config Backend config
+ * @param {FastifyBaseLogger} logger Fastify logger instance
+ * @returns {PayoutSender | null} Configured payout sender or null when wallet key is missing
+ */
 export function createMassaPayoutSender(
   config: AppConfig,
   logger: FastifyBaseLogger,
@@ -92,6 +124,11 @@ export function createMassaPayoutSender(
 
   let runtimePromise: Promise<MassaRuntime> | null = null;
 
+  /**
+   * Lazily initializes account, provider, and token wrapper
+   *
+   * @returns {Promise<MassaRuntime>} Cached runtime dependencies
+   */
   async function getRuntime(): Promise<MassaRuntime> {
     if (!runtimePromise) {
       runtimePromise = (async () => {
@@ -126,6 +163,13 @@ export function createMassaPayoutSender(
     return runtimePromise;
   }
 
+  /**
+   * Waits for payout operation status according to configured confirmation mode
+   *
+   * @param {string} txHash Submitted operation hash
+   * @param {JsonRpcProvider} provider Bound RPC provider
+   * @returns {Promise<OperationStatus>} Observed operation status
+   */
   async function waitOperationStatus(
     txHash: string,
     provider: JsonRpcProvider,

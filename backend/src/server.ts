@@ -106,6 +106,12 @@ type PayoutOptions = {
 
 const X_PROFILE_REGEX = /^https:\/\/x\.com\/([A-Za-z0-9_]{1,15})\/?$/;
 
+/**
+ * Normalizes X profile URL into canonical lowercase form
+ *
+ * @param {string} input Raw X profile URL
+ * @returns {string | null} Canonical profile URL or null when invalid
+ */
 function normalizeXProfileUrl(input: string): string | null {
   const trimmed = input.trim();
   const match = X_PROFILE_REGEX.exec(trimmed);
@@ -116,10 +122,22 @@ function normalizeXProfileUrl(input: string): string | null {
   return `https://x.com/${username}`;
 }
 
+/**
+ * Returns safe X profile fallback for logs and messages
+ *
+ * @param {string | null | undefined} value Stored X profile value
+ * @returns {string} Existing profile or placeholder URL
+ */
 function safeXProfile(value: string | null | undefined): string {
   return value ?? "https://x.com/unknown";
 }
 
+/**
+ * Escapes HTML entities for admin review page rendering
+ *
+ * @param {string | number | null | undefined} value Raw value
+ * @returns {string} Escaped HTML string
+ */
 function escapeHtml(value: string | number | null | undefined): string {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -129,10 +147,27 @@ function escapeHtml(value: string | number | null | undefined): string {
     .replaceAll("'", "&#39;");
 }
 
+/**
+ * Builds signed admin review token for approve/reject links
+ *
+ * @param {string} secret Shared review secret
+ * @param {string} claimId Claim id
+ * @param {ManualReviewAction} action Review action
+ * @returns {string} HMAC token
+ */
 function buildManualReviewToken(secret: string, claimId: string, action: ManualReviewAction): string {
   return hmacSha256Hex(secret, `${claimId}:${action}`);
 }
 
+/**
+ * Validates signed admin review token
+ *
+ * @param {string} secret Shared review secret
+ * @param {string} claimId Claim id
+ * @param {ManualReviewAction} action Review action
+ * @param {string} token Provided token
+ * @returns {boolean} True when token matches expected signature
+ */
 function isValidManualReviewToken(
   secret: string,
   claimId: string,
@@ -146,6 +181,14 @@ function isValidManualReviewToken(
   return safeEqual(expected, token);
 }
 
+/**
+ * Builds one-click admin review link for Slack notification
+ *
+ * @param {AppConfig} config Backend config
+ * @param {string} claimId Claim id
+ * @param {ManualReviewAction} action Review action
+ * @returns {string | null} Fully qualified review URL or null when review links are disabled
+ */
 function buildManualReviewLink(
   config: AppConfig,
   claimId: string,
@@ -158,6 +201,27 @@ function buildManualReviewLink(
   return `${config.adminReviewBaseUrl}/admin/review/${encodeURIComponent(claimId)}?action=${action}&token=${token}`;
 }
 
+/**
+ * Renders admin review result page for approve/reject links
+ *
+ * @param {{
+ *   title: string;
+ *   summary: string;
+ *   claim?: {
+ *     id: string;
+ *     sessionId: string;
+ *     status: string;
+ *     address: string;
+ *     xProfile: string | null;
+ *     amount: number;
+ *     verificationMode: string;
+ *     txHash: string | null;
+ *     createdAt: Date;
+ *     updatedAt: Date;
+ *   } | null;
+ * }} input Page content
+ * @returns {string} Rendered HTML page
+ */
 function renderAdminReviewPage(input: {
   title: string;
   summary: string;
@@ -228,6 +292,12 @@ function renderAdminReviewPage(input: {
 </html>`;
 }
 
+/**
+ * Builds Fastify logger config with optional pretty transport
+ *
+ * @param {AppConfig} config Backend config
+ * @returns {object} Fastify logger options
+ */
 function createLoggerOptions(config: AppConfig) {
   if (config.prettyLogs) {
     return {
@@ -245,6 +315,13 @@ function createLoggerOptions(config: AppConfig) {
   return { level: config.logLevel };
 }
 
+/**
+ * Creates audit log writer that mirrors entries to Fastify logger and Prisma
+ *
+ * @param {PrismaClient} prisma Prisma client
+ * @param {FastifyBaseLogger} logger Fastify logger
+ * @returns {(input: AuditLogInput) => Promise<void>} Audit writer function
+ */
 function createAuditWriter(prisma: PrismaClient, logger: FastifyBaseLogger) {
   return async function writeAuditLog(input: AuditLogInput): Promise<void> {
     const level = input.level ?? "INFO";
@@ -303,6 +380,12 @@ function createAuditWriter(prisma: PrismaClient, logger: FastifyBaseLogger) {
   };
 }
 
+/**
+ * Formats human-readable Slack message for successful payout events
+ *
+ * @param {PayoutContext} context Payout context
+ * @returns {string} Slack message text
+ */
 function formatSlackPayoutMessage(context: PayoutContext): string {
   const payoutMode = context.dryRun ? "DRY RUN" : "REAL";
   return [
@@ -321,6 +404,13 @@ function formatSlackPayoutMessage(context: PayoutContext): string {
     .join("\n");
 }
 
+/**
+ * Formats human-readable Slack message for manual review requests
+ *
+ * @param {AppConfig} config Backend config
+ * @param {PayoutContext} context Payout context
+ * @returns {string} Slack message text
+ */
 function formatSlackManualReviewMessage(config: AppConfig, context: PayoutContext): string {
   const approveLink = buildManualReviewLink(config, context.claimId, "approve");
   const rejectLink = buildManualReviewLink(config, context.claimId, "reject");
@@ -342,6 +432,14 @@ function formatSlackManualReviewMessage(config: AppConfig, context: PayoutContex
     .join("\n");
 }
 
+/**
+ * Posts message to configured Slack webhook
+ *
+ * @param {FastifyInstance} app Fastify app for logging
+ * @param {AppConfig} config Backend config
+ * @param {string} text Slack message text
+ * @returns {Promise<void>}
+ */
 async function sendSlackNotification(app: FastifyInstance, config: AppConfig, text: string): Promise<void> {
   if (!config.slackWebhookUrl) {
     return;
@@ -374,6 +472,12 @@ async function sendSlackNotification(app: FastifyInstance, config: AppConfig, te
   }
 }
 
+/**
+ * Creates fully configured Fastify app with rewards, claim, and admin endpoints
+ *
+ * @param {CreateAppOptions} [options={}] Optional config, Prisma, and payout overrides
+ * @returns {FastifyInstance} Ready Fastify app instance
+ */
 export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const config = options.config ?? getConfig();
   const prisma = options.prisma ?? new PrismaClient();
@@ -659,6 +763,13 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     txHash?: string;
   };
 
+  /**
+   * Moves claim into manual review and sends admin notification
+   *
+   * @param {ReviewInput} input Claim identifiers and optional signature data
+   * @param {string} reason Manual review reason
+   * @returns {Promise<{ status: string; reason: string; txHash?: string | null }>} Manual review response payload
+   */
   async function markAsManualReview(input: ReviewInput, reason: string) {
     const claim = await prisma.claim.update({
       where: { id: input.claimId },
@@ -706,6 +817,15 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     };
   }
 
+  /**
+   * Marks payout as fully paid and writes audit trail
+   *
+   * @param {string} claimId Claim id
+   * @param {string} txHash On-chain transaction hash
+   * @param {Record<string, unknown>} extraPayload Additional audit payload
+   * @param {string} auditEvent Audit event name
+   * @returns {Promise<Awaited<ReturnType<typeof prisma.claim.findUnique>>>} Original claim row
+   */
   async function markPayoutPaid(
     claimId: string,
     txHash: string,
@@ -755,6 +875,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return claim;
   }
 
+  /**
+   * Marks payout as submitted but not yet final
+   *
+   * @param {string} claimId Claim id
+   * @param {string} txHash Submitted on-chain transaction hash
+   * @param {Record<string, unknown>} extraPayload Additional audit payload
+   * @returns {Promise<Awaited<ReturnType<typeof prisma.claim.findUnique>>>} Original claim row
+   */
   async function markPayoutSubmitted(
     claimId: string,
     txHash: string,
@@ -802,6 +930,15 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return claim;
   }
 
+  /**
+   * Records payout failure and escalates claim to manual review
+   *
+   * @param {string} claimId Claim id
+   * @param {string} errorMessage Failure reason
+   * @param {string} [txHash] Related transaction hash
+   * @param {Record<string, unknown>} [extraPayload] Additional audit payload
+   * @returns {Promise<{ status: string; reason: string; txHash?: string | null }>} Manual review response payload
+   */
   async function markPayoutFailed(
     claimId: string,
     errorMessage: string,
@@ -852,6 +989,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     );
   }
 
+  /**
+   * Sends Slack notification for already paid claim
+   *
+   * @param {string} claimId Claim id
+   * @param {string} txHash On-chain transaction hash
+   * @param {boolean} dryRun Whether payout was simulated
+   * @returns {Promise<void>}
+   */
   async function notifyPayoutPaid(claimId: string, txHash: string, dryRun: boolean) {
     const [claim, run] = await Promise.all([
       prisma.claim.findUnique({ where: { id: claimId } }),
@@ -882,6 +1027,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     );
   }
 
+  /**
+   * Starts background reconciliation for non-final payout
+   *
+   * @param {string} claimId Claim id
+   * @param {string} txHash Submitted on-chain transaction hash
+   */
   function schedulePayoutFinalization(claimId: string, txHash: string) {
     if (!payoutSender || config.payoutDryRun) {
       return;
@@ -923,6 +1074,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       });
   }
 
+  /**
+   * Rechecks payout status for claims stuck in confirmed state
+   *
+   * @param {string} claimId Claim id
+   * @returns {Promise<void>}
+   */
   async function reconcilePendingPayout(claimId: string) {
     if (!payoutSender || config.payoutDryRun) {
       return;
@@ -961,6 +1118,13 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     }
   }
 
+  /**
+   * Queues payout job and executes payout path
+   *
+   * @param {string} claimId Claim id
+   * @param {PayoutOptions} [options={}] Payout execution options
+   * @returns {Promise<Record<string, unknown>>} Claim status payload
+   */
   async function enqueueAndProcessPayout(claimId: string, options: PayoutOptions = {}) {
     const claim = await prisma.claim.findUnique({ where: { id: claimId } });
     if (!claim) {
@@ -1506,6 +1670,11 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   return app;
 }
 
+/**
+ * Boots backend server from environment config
+ *
+ * @returns {Promise<void>}
+ */
 async function bootstrap() {
   const config = getConfig();
   const app = createApp({ config });
@@ -1534,6 +1703,11 @@ async function bootstrap() {
   );
 }
 
+/**
+ * Checks whether current file is executed as process entry point
+ *
+ * @returns {boolean} True when server should auto-bootstrap
+ */
 function isMainModule() {
   const entryPoint = process.argv[1];
   if (!entryPoint) {

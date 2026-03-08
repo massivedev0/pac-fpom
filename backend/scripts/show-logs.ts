@@ -31,6 +31,12 @@ const COLOR = {
   green: "\x1b[32m",
 } as const;
 
+/**
+ * Parses CLI flags for audit-log viewer
+ *
+ * @param {string[]} argv Raw CLI arguments
+ * @returns {CliOptions} Parsed CLI options
+ */
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     limit: 50,
@@ -76,6 +82,12 @@ function parseArgs(argv: string[]): CliOptions {
   return options;
 }
 
+/**
+ * Shortens long ids and addresses for table output
+ *
+ * @param {string | null | undefined} value Raw value
+ * @returns {string} Compact printable value
+ */
 function short(value: string | null | undefined): string {
   if (!value) {
     return "-";
@@ -86,6 +98,12 @@ function short(value: string | null | undefined): string {
   return `${value.slice(0, 8)}...${value.slice(-8)}`;
 }
 
+/**
+ * Normalizes payload column into compact JSON string
+ *
+ * @param {string | null} payload Raw payload column
+ * @returns {string} Printable payload string
+ */
 function formatPayload(payload: string | null): string {
   if (!payload) {
     return "-";
@@ -99,6 +117,13 @@ function formatPayload(payload: string | null): string {
   }
 }
 
+/**
+ * Cuts text to fixed width for aligned table rendering
+ *
+ * @param {string} text Raw text
+ * @param {number} width Max cell width
+ * @returns {string} Truncated text
+ */
 function truncate(text: string, width: number): string {
   if (text.length <= width) {
     return text;
@@ -109,6 +134,14 @@ function truncate(text: string, width: number): string {
   return `${text.slice(0, width - 1)}…`;
 }
 
+/**
+ * Wraps ANSI color codes around text when terminal output supports it
+ *
+ * @param {string} text Raw text
+ * @param {string} code ANSI color code
+ * @param {boolean} enabled Whether colors are enabled
+ * @returns {string} Colorized or plain text
+ */
 function colorize(text: string, code: string, enabled: boolean): string {
   if (!enabled) {
     return text;
@@ -116,6 +149,12 @@ function colorize(text: string, code: string, enabled: boolean): string {
   return `${code}${text}${COLOR.reset}`;
 }
 
+/**
+ * Maps audit level to ANSI color code
+ *
+ * @param {string} level Audit level
+ * @returns {string} ANSI color code
+ */
 function levelColor(level: string): string {
   if (level === "ERROR") return COLOR.red;
   if (level === "WARN") return COLOR.yellow;
@@ -123,6 +162,12 @@ function levelColor(level: string): string {
   return COLOR.magenta;
 }
 
+/**
+ * Converts DB audit rows into printable table rows
+ *
+ * @param {Awaited<ReturnType<PrismaClient["auditLog"]["findMany"]>>} logs Audit log rows
+ * @returns {RowData[]} Printable row models
+ */
 function rowsFromLogs(
   logs: Awaited<ReturnType<PrismaClient["auditLog"]["findMany"]>>,
 ): RowData[] {
@@ -137,6 +182,13 @@ function rowsFromLogs(
   }));
 }
 
+/**
+ * Renders fixed-width colored table for terminal output
+ *
+ * @param {RowData[]} rows Printable table rows
+ * @param {boolean} colorEnabled Whether ANSI colors are enabled
+ * @returns {string} Formatted table string
+ */
 function renderTable(rows: RowData[], colorEnabled: boolean): string {
   const headers: RowData = {
     time: "time",
@@ -216,6 +268,11 @@ function renderTable(rows: RowData[], colorEnabled: boolean): string {
   return lines.join("\n");
 }
 
+/**
+ * Loads filtered audit logs and prints them to stdout
+ *
+ * @returns {Promise<void>}
+ */
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const prisma = new PrismaClient();

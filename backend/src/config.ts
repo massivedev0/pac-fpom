@@ -26,6 +26,13 @@ export type AppConfig = {
 
 type EnvSource = Record<string, string | undefined>;
 
+/**
+ * Parses numeric env value with fallback
+ *
+ * @param {string | undefined} value Raw env value
+ * @param {number} fallback Default number
+ * @returns {number} Parsed numeric value or fallback
+ */
 function asNumber(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   if (Number.isFinite(parsed)) {
@@ -34,6 +41,12 @@ function asNumber(value: string | undefined, fallback: number): number {
   return fallback;
 }
 
+/**
+ * Splits comma-separated env value into trimmed entries
+ *
+ * @param {string | undefined} value Raw CSV env value
+ * @returns {string[]} Parsed values without empties
+ */
 function parseCsv(value: string | undefined): string[] {
   if (!value) {
     return [];
@@ -44,6 +57,12 @@ function parseCsv(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Builds application config from environment variables
+ *
+ * @param {EnvSource} [env=process.env] Env source object
+ * @returns {AppConfig} Normalized backend config
+ */
 export function getConfig(env: EnvSource = process.env): AppConfig {
   const corsAllowedOrigins = parseCsv(env.CORS_ALLOWED_ORIGINS);
   const defaultAllowedOrigins = [

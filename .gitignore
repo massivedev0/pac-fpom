@@ -10,3 +10,4 @@ tests/playwright/artifacts/
 
 # environment variables
 .env
+backend/prisma/rewards*.db*
