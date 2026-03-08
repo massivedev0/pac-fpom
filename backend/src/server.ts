@@ -110,6 +110,7 @@ type PayoutContext = {
   xProfile: string;
   clientWallet?: string | null;
   clientDevice?: string | null;
+  details?: string[] | null;
   amount: number;
   verificationMode: string;
   riskScore?: number | null;
@@ -697,6 +698,7 @@ function formatSlackManualReviewMessage(config: AppConfig, context: PayoutContex
   return [
     "FPOM manual review requested",
     `Reason: ${describeReason(context.reason)}`,
+    context.details && context.details.length > 0 ? `Details: ${context.details.join("; ")}` : undefined,
     `Claim ID: ${context.claimId}`,
     `Session ID: ${context.sessionId}`,
     `Address: ${context.address}`,
@@ -717,6 +719,88 @@ function formatSlackManualReviewMessage(config: AppConfig, context: PayoutContex
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+type RiskAssessmentInput = {
+  verificationMode: string;
+  ipClaims24h: number;
+  fpClaims24h: number;
+  sessionEventsCount: number;
+  runDurationMs: number;
+  minRunDurationMs: number;
+  maxRunDurationMs: number;
+  finalScoreClient: number;
+  finalScoreServer: number;
+  ipClaimsPerDayLimit: number;
+};
+
+type RiskAssessment = {
+  risk: number;
+  details: string[];
+  scoreDiff: number;
+  scoreDiffThreshold: number;
+};
+
+/**
+ * Computes risk score and human-readable factors for a claim verification attempt
+ *
+ * @param {RiskAssessmentInput} input Verification counters and run metrics
+ * @returns {RiskAssessment} Risk score with detailed contributing factors
+ */
+function computeRiskAssessment(input: RiskAssessmentInput): RiskAssessment {
+  let risk = 0;
+  const details: string[] = [];
+
+  if (input.verificationMode === VERIFICATION_MODES.address_only) {
+    risk += 2;
+    details.push("address-only verification (+2)");
+  }
+  if (input.ipClaims24h >= input.ipClaimsPerDayLimit) {
+    risk += 5;
+    details.push(
+      `IP seen in ${input.ipClaims24h} claims during last 24h (limit ${input.ipClaimsPerDayLimit}) (+5)`,
+    );
+  }
+  if (input.fpClaims24h >= 3) {
+    risk += 3;
+    details.push(`fingerprint seen in ${input.fpClaims24h} claims during last 24h (+3)`);
+  }
+  if (input.sessionEventsCount === 0) {
+    risk += 2;
+    details.push("no gameplay telemetry events received (+2)");
+  } else if (input.sessionEventsCount < 5) {
+    risk += 1;
+    details.push(`very low gameplay telemetry count: ${input.sessionEventsCount} (+1)`);
+  }
+  if (input.sessionEventsCount > 5000) {
+    risk += 2;
+    details.push(`excessive gameplay telemetry count: ${input.sessionEventsCount} (+2)`);
+  }
+  if (
+    input.runDurationMs < input.minRunDurationMs ||
+    input.runDurationMs > input.maxRunDurationMs
+  ) {
+    risk += 3;
+    details.push(
+      `run duration ${input.runDurationMs}ms outside ${input.minRunDurationMs}-${input.maxRunDurationMs}ms (+3)`,
+    );
+  }
+
+  const scoreDiff = Math.abs(input.finalScoreClient - input.finalScoreServer);
+  const scoreDiffThreshold = Math.max(500, Math.floor(input.finalScoreServer * 0.2));
+  if (scoreDiff > scoreDiffThreshold) {
+    risk += 2;
+    details.push(
+      `client/server score diff ${scoreDiff} exceeds threshold ${scoreDiffThreshold} (+2)`,
+    );
+  }
+
+  return {
+    risk,
+    details,
+    scoreDiff,
+    scoreDiffThreshold,
+  };
 }
 
 /**
@@ -1143,6 +1227,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     txHash?: string;
     balanceSnapshot?: PayoutBalanceSnapshot | null;
     projectedFpomBalanceRaw?: string;
+    details?: string[];
   };
 
   /**
@@ -1295,6 +1380,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       address: claim.address,
       payload: {
         reason,
+        details: input.details ?? null,
         amount: claim.amount,
         verificationMode: claim.verificationMode,
         xProfile: claim.xProfile,
@@ -1313,6 +1399,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         xProfile: safeXProfile(claim.xProfile),
         clientWallet: claim.clientWallet,
         clientDevice: claim.clientDevice,
+        details: input.details ?? null,
         amount: claim.amount,
         verificationMode: claim.verificationMode,
         riskScore: run?.riskScore ?? null,
@@ -1326,6 +1413,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return {
       status: CLAIM_STATUSES.MANUAL_REVIEW,
       reason,
+      details: input.details ?? [],
       txHash: claim.txHash,
     };
   }
@@ -2099,31 +2187,19 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       });
     }
 
-    let risk = 0;
-    if (claim.verificationMode === VERIFICATION_MODES.address_only) {
-      risk += 2;
-    }
-    if (ipClaims24h >= config.ipClaimsPerDayLimit) {
-      risk += 5;
-    }
-    if (fpClaims24h >= 3) {
-      risk += 3;
-    }
-    if (sessionEventsCount === 0) {
-      risk += 2;
-    } else if (sessionEventsCount < 5) {
-      risk += 1;
-    }
-    if (sessionEventsCount > 5000) {
-      risk += 2;
-    }
-    if (run.durationMs < config.minRunDurationMs || run.durationMs > config.maxRunDurationMs) {
-      risk += 3;
-    }
-    const scoreDiff = Math.abs(run.finalScoreClient - run.finalScoreServer);
-    if (scoreDiff > Math.max(500, Math.floor(run.finalScoreServer * 0.2))) {
-      risk += 2;
-    }
+    const riskAssessment = computeRiskAssessment({
+      verificationMode: claim.verificationMode,
+      ipClaims24h,
+      fpClaims24h,
+      sessionEventsCount,
+      runDurationMs: run.durationMs,
+      minRunDurationMs: config.minRunDurationMs,
+      maxRunDurationMs: config.maxRunDurationMs,
+      finalScoreClient: run.finalScoreClient,
+      finalScoreServer: run.finalScoreServer,
+      ipClaimsPerDayLimit: config.ipClaimsPerDayLimit,
+    });
+    const risk = riskAssessment.risk;
 
     await prisma.run.update({ where: { sessionId: claim.sessionId }, data: { riskScore: risk } });
 
@@ -2135,15 +2211,24 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       payload: {
         verificationMode: claim.verificationMode,
         risk,
+        riskDetails: riskAssessment.details,
         xProfile: claim.xProfile,
         ipClaims24h,
         fpClaims24h,
         sessionEventsCount,
+        scoreDiff: riskAssessment.scoreDiff,
+        scoreDiffThreshold: riskAssessment.scoreDiffThreshold,
       },
     });
 
     if (risk >= 5) {
-      return markAsManualReview(parsed.data, "risk_threshold_exceeded");
+      return markAsManualReview(
+        {
+          ...parsed.data,
+          details: riskAssessment.details,
+        },
+        "risk_threshold_exceeded",
+      );
     }
 
     await prisma.claim.update({

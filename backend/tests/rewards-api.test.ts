@@ -42,6 +42,11 @@ const BASE_CONFIG: AppConfig = {
 };
 
 const VALID_ADDRESS = "AU12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib";
+const EXTRA_VALID_ADDRESSES = [
+  "AU9XGDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+  "AU77GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+  "AU88GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
+] as const;
 
 const WINNING_RUN = {
   won: true,
@@ -493,6 +498,62 @@ test("Slack manual review notification should include client wallet and device m
     assert.match(slackRequests[0], /FPOM manual review requested/);
     assert.match(slackRequests[0], /Client wallet: Bearby/);
     assert.match(slackRequests[0], /MacIntel/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await context.cleanup();
+  }
+});
+
+test("risk-threshold manual review should include detailed reason breakdown in Slack", async () => {
+  const originalFetch = globalThis.fetch;
+  const slackRequests: string[] = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    slackRequests.push(String(init?.body || ""));
+    return new Response("", { status: 200 });
+  }) as typeof fetch;
+
+  const context = await createTestContext({
+    payoutDryRun: true,
+    slackWebhookUrl: "https://hooks.slack.test/services/fpom",
+  });
+
+  try {
+    await createPaidClaim(context.app, VALID_ADDRESS, nextXProfile());
+    await createPaidClaim(context.app, EXTRA_VALID_ADDRESSES[0], nextXProfile());
+    await createPaidClaim(context.app, EXTRA_VALID_ADDRESSES[1], nextXProfile());
+    slackRequests.length = 0;
+
+    const session = await startSession(context.app);
+    await pushSessionEvents(context.app, session.sessionId, 12);
+    const prepareResponse = await prepareClaim(context.app, {
+      sessionId: session.sessionId,
+      address: EXTRA_VALID_ADDRESSES[2],
+      xProfile: nextXProfile(),
+      verificationMode: "address_only",
+      clientWallet: "Massa Station",
+      clientDevice: TEST_CLIENT_DEVICE,
+      run: WINNING_RUN,
+    });
+
+    assert.equal(prepareResponse.statusCode, 200);
+    const prepared = prepareResponse.json() as { claimId: string };
+
+    const confirmResponse = await confirmClaim(context.app, {
+      claimId: prepared.claimId,
+    });
+
+    assert.equal(confirmResponse.statusCode, 200);
+    const body = confirmResponse.json() as { status: string; details: string[] };
+    assert.equal(body.status, "MANUAL_REVIEW");
+    assert.ok(Array.isArray(body.details));
+    assert.match(body.details.join("; "), /address-only verification/);
+    assert.match(body.details.join("; "), /fingerprint seen in 3 claims/);
+
+    assert.equal(slackRequests.length, 1);
+    assert.match(slackRequests[0], /Reason: Claim exceeded automatic risk threshold/);
+    assert.match(slackRequests[0], /Details: /);
+    assert.match(slackRequests[0], /address-only verification \(\+2\)/);
+    assert.match(slackRequests[0], /fingerprint seen in 3 claims during last 24h \(\+3\)/);
   } finally {
     globalThis.fetch = originalFetch;
     await context.cleanup();
