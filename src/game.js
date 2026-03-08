@@ -106,6 +106,7 @@ const STATE = {
   rewards: {
     apiBase: "",
     promoTweetUrl: "",
+    txExplorerUrlTemplate: "",
     promoOverrideLocked: false,
     promoConfigFetchTried: false,
     sessionId: null,
@@ -123,6 +124,7 @@ const STATE = {
     walletAccount: null,
     walletModalInFlight: false,
     activeClaimId: null,
+    lastClaimTxHash: "",
   },
 };
 
@@ -183,13 +185,45 @@ function isDebugToolsEnabled() {
 // ------------------------------------------------------------
 
 /**
+ * Renders claim status text and optional explorer link into reward UI
+ *
+ * @param {{ text: string; txExplorerUrl?: string; txHash?: string }} input Claim status view model
+ */
+function setClaimStatusView(input) {
+  const text = String(input?.text || "");
+  const txExplorerUrl = String(input?.txExplorerUrl || "").trim();
+  const txHash = String(input?.txHash || "").trim();
+
+  STATE.rewards.claimStatusText = text;
+  if (!claimStatus) {
+    return;
+  }
+
+  claimStatus.textContent = "";
+  if (!text) {
+    return;
+  }
+
+  claimStatus.append(document.createTextNode(text));
+  if (txExplorerUrl) {
+    claimStatus.append(document.createTextNode(" "));
+    const link = document.createElement("a");
+    link.className = "claim-status-link";
+    link.href = txExplorerUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = txHash ? "Open in explorer" : "Explorer";
+    claimStatus.append(link);
+  }
+}
+
+/**
  * Updates claim status text in state and UI
+ *
+ * @param {string} text Claim status text
  */
 function setClaimStatus(text) {
-  STATE.rewards.claimStatusText = text;
-  if (claimStatus) {
-    claimStatus.textContent = text;
-  }
+  setClaimStatusView({ text });
 }
 
 /**
@@ -240,6 +274,7 @@ const rewardsController = createRewardsController({
   rewardsState: STATE.rewards,
   runStats: STATE.runStats,
   setClaimStatus,
+  setClaimStatusView,
   setClaimControlsDisabled,
   applyPromoTweetUrl,
   getScore: () => STATE.score,

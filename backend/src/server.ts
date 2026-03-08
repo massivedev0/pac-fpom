@@ -530,10 +530,11 @@ function createAuditWriter(prisma: PrismaClient, logger: FastifyBaseLogger) {
 /**
  * Formats human-readable Slack message for successful payout events
  *
+ * @param {AppConfig} config Backend config
  * @param {PayoutContext} context Payout context
  * @returns {string} Slack message text
  */
-function formatSlackPayoutMessage(context: PayoutContext): string {
+function formatSlackPayoutMessage(config: AppConfig, context: PayoutContext): string {
   const payoutMode = context.dryRun ? "DRY RUN" : "REAL";
   return [
     "FPOM payout event",
@@ -546,6 +547,7 @@ function formatSlackPayoutMessage(context: PayoutContext): string {
     `Verification: ${context.verificationMode}`,
     context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
     context.txHash ? `Tx hash: ${context.txHash}` : undefined,
+    context.txHash ? formatExplorerSlackLine(context.txHash, config.massaExplorerTxUrlTemplate) : undefined,
     context.balanceSnapshot ? `Payout wallet MAS: ${context.balanceSnapshot.masBalanceMas}` : undefined,
     context.balanceSnapshot
       ? `Payout wallet FPOM: ${context.balanceSnapshot.fpomBalanceTokens}`
@@ -624,6 +626,7 @@ function formatSlackManualReviewMessage(config: AppConfig, context: PayoutContex
     `Verification: ${context.verificationMode}`,
     context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
     context.txHash ? `Tx hash: ${context.txHash}` : undefined,
+    context.txHash ? formatExplorerSlackLine(context.txHash, config.massaExplorerTxUrlTemplate) : undefined,
     context.balanceSnapshot ? `Payout wallet MAS: ${context.balanceSnapshot.masBalanceMas}` : undefined,
     context.balanceSnapshot
       ? `Payout wallet FPOM: ${context.balanceSnapshot.fpomBalanceTokens}`
@@ -662,6 +665,43 @@ function formatSlackLowBalanceMessage(input: {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * Builds explorer URL from configured template and transaction hash
+ *
+ * @param {string} txHash Operation hash
+ * @param {string} template Explorer URL template or base URL
+ * @returns {string} Explorer URL or empty string
+ */
+function buildExplorerTxUrl(txHash: string, template: string): string {
+  const normalizedTxHash = String(txHash || "").trim();
+  const normalizedTemplate = String(template || "").trim();
+  if (!normalizedTxHash || !normalizedTemplate) {
+    return "";
+  }
+
+  if (normalizedTemplate.includes("{txHash}")) {
+    return normalizedTemplate.replaceAll("{txHash}", encodeURIComponent(normalizedTxHash));
+  }
+
+  const separator = normalizedTemplate.endsWith("/") ? "" : "/";
+  return `${normalizedTemplate}${separator}${encodeURIComponent(normalizedTxHash)}`;
+}
+
+/**
+ * Formats optional explorer line for Slack messages
+ *
+ * @param {string} txHash Operation hash
+ * @param {string} template Explorer URL template or base URL
+ * @returns {string | undefined} Explorer line when URL can be built
+ */
+function formatExplorerSlackLine(txHash: string, template: string): string | undefined {
+  const url = buildExplorerTxUrl(txHash, template);
+  if (!url) {
+    return undefined;
+  }
+  return `Explorer: ${url}`;
 }
 
 /**
@@ -757,6 +797,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   app.get("/health", async () => ({ ok: true }));
   app.get("/public/config", async () => ({
     xPromoTweet: config.xPromoTweet,
+    txExplorerUrlTemplate: config.massaExplorerTxUrlTemplate,
   }));
 
   app.post("/session/start", async (req, reply) => {
@@ -1404,7 +1445,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     await sendSlackNotification(
       app,
       config,
-      formatSlackPayoutMessage({
+      formatSlackPayoutMessage(config, {
         claimId: claim.id,
         sessionId: claim.sessionId,
         address: claim.address,
@@ -1585,7 +1626,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       await sendSlackNotification(
         app,
         config,
-        formatSlackPayoutMessage({
+        formatSlackPayoutMessage(config, {
           claimId: claim.id,
           sessionId: claim.sessionId,
           address: claim.address,

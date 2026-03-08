@@ -19,6 +19,7 @@ const CLAIM_STATUS_POLL_INTERVAL_MS = 5000;
  * @param {any} options.rewardsState Mutable rewards state slice
  * @param {any} options.runStats Mutable run statistics slice
  * @param {(text: string) => void} options.setClaimStatus Claim status UI updater
+ * @param {(input: { text: string; txExplorerUrl?: string; txHash?: string }) => void} options.setClaimStatusView Rich claim status UI updater
  * @param {(disabled: boolean) => void} options.setClaimControlsDisabled Claim control state updater
  * @param {(url: string) => void} options.applyPromoTweetUrl Promo tweet link updater
  * @param {() => number} options.getScore Current score getter
@@ -48,6 +49,7 @@ export function createRewardsController(options) {
     rewardsState,
     runStats,
     setClaimStatus,
+    setClaimStatusView,
     setClaimControlsDisabled,
     applyPromoTweetUrl,
     getScore,
@@ -133,6 +135,7 @@ export function createRewardsController(options) {
    */
   function applyRuntimeConfig() {
     rewardsState.apiBase = getRewardsApiBase();
+    rewardsState.txExplorerUrlTemplate = "";
     const promoTweetOverride = getPromoTweetOverrideUrl();
     rewardsState.promoOverrideLocked = Boolean(promoTweetOverride);
     rewardsState.promoConfigFetchTried = false;
@@ -140,11 +143,11 @@ export function createRewardsController(options) {
   }
 
   /**
-   * Fetches promo tweet URL from backend config
+   * Fetches public rewards config from backend
    *
    * @returns {Promise<void>}
    */
-  async function syncPromoTweetFromBackend() {
+  async function syncPublicConfigFromBackend() {
     if (!rewardsState.apiBase) {
       return;
     }
@@ -154,9 +157,13 @@ export function createRewardsController(options) {
       if (payload && typeof payload.xPromoTweet === "string" && payload.xPromoTweet.trim()) {
         applyPromoTweetUrl(payload.xPromoTweet.trim());
       }
+      rewardsState.txExplorerUrlTemplate =
+        payload && typeof payload.txExplorerUrlTemplate === "string"
+          ? payload.txExplorerUrlTemplate.trim()
+          : "";
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown";
-      console.warn(`Failed to load promo tweet from backend: ${reason}`);
+      console.warn(`Failed to load public config from backend: ${reason}`);
     }
   }
 
@@ -175,7 +182,44 @@ export function createRewardsController(options) {
     }
 
     rewardsState.promoConfigFetchTried = true;
-    syncPromoTweetFromBackend().catch(() => {});
+    syncPublicConfigFromBackend().catch(() => {});
+  }
+
+  /**
+   * Builds explorer URL for a transaction hash using configured template
+   *
+   * @param {string} txHash Operation hash
+   * @returns {string} Explorer URL or empty string
+   */
+  function buildTxExplorerUrl(txHash) {
+    const normalizedTxHash = String(txHash || "").trim();
+    const template = String(rewardsState.txExplorerUrlTemplate || "").trim();
+    if (!normalizedTxHash || !template) {
+      return "";
+    }
+
+    if (template.includes("{txHash}")) {
+      return template.replaceAll("{txHash}", encodeURIComponent(normalizedTxHash));
+    }
+
+    const separator = template.endsWith("/") ? "" : "/";
+    return `${template}${separator}${encodeURIComponent(normalizedTxHash)}`;
+  }
+
+  /**
+   * Stores latest known tx hash so polling messages keep it visible across transitions
+   *
+   * @param {any} claim Backend claim payload
+   * @returns {string} Latest known tx hash
+   */
+  function rememberClaimTxHash(claim) {
+    const currentTxHash =
+      claim && typeof claim.txHash === "string" ? claim.txHash.trim() : "";
+    if (currentTxHash) {
+      rewardsState.lastClaimTxHash = currentTxHash;
+      return currentTxHash;
+    }
+    return String(rewardsState.lastClaimTxHash || "").trim();
   }
 
   /**
@@ -326,33 +370,43 @@ export function createRewardsController(options) {
   }
 
   /**
-   * Maps backend claim object to user-facing status text
+   * Maps backend claim object to user-facing status presentation
    *
    * @param {any} claim Backend claim payload
-   * @returns {string} Human-readable status message
+   * @returns {{ text: string; txHash?: string; txExplorerUrl?: string }} User-facing status presentation
    */
   function formatClaimStatusMessage(claim) {
     if (!claim || typeof claim.status !== "string") {
-      return "Claim status is unavailable";
+      return { text: "Claim status is unavailable" };
     }
 
+    const txHash = rememberClaimTxHash(claim);
+    const txExplorerUrl = buildTxExplorerUrl(txHash);
+
     if (claim.status === "PAID") {
-      const txHash = typeof claim.txHash === "string" && claim.txHash ? ` tx=${claim.txHash}` : "";
-      return `Claim approved and paid.${txHash}`;
+      return {
+        text: `Claim approved and paid.${txHash ? ` tx=${txHash}` : ""}`,
+        txHash,
+        txExplorerUrl,
+      };
     }
     if (claim.status === "REJECTED") {
-      return "Claim was rejected";
+      return { text: "Claim was rejected" };
     }
     if (claim.status === "CONFIRMED") {
-      return "Claim approved. Payout is being finalized...";
+      return {
+        text: `Claim approved. Payout is being finalized...${txHash ? ` tx=${txHash}` : ""}`,
+        txHash,
+        txExplorerUrl,
+      };
     }
     if (claim.status === "MANUAL_REVIEW") {
-      return "Claim is in manual review. Waiting for admin decision...";
+      return { text: "Claim is in manual review. Waiting for admin decision..." };
     }
     if (claim.status === "PREPARED") {
-      return "Claim is prepared. Waiting for backend processing...";
+      return { text: "Claim is prepared. Waiting for backend processing..." };
     }
-    return `Claim status: ${String(claim.status)}`;
+    return { text: `Claim status: ${String(claim.status)}` };
   }
 
   /**
@@ -369,7 +423,7 @@ export function createRewardsController(options) {
     claimStatusPollInFlight = true;
     try {
       const claim = await apiGet(`/claim/${encodeURIComponent(claimId)}`);
-      setClaimStatus(formatClaimStatusMessage(claim));
+      setClaimStatusView(formatClaimStatusMessage(claim));
 
       if (claim?.status === "PAID" || claim?.status === "REJECTED") {
         stopClaimStatusPolling();
@@ -408,6 +462,7 @@ export function createRewardsController(options) {
     rewardsState.eventOverflow = false;
     rewardsState.eventFlushInFlight = false;
     rewardsState.claimInFlight = false;
+    rewardsState.lastClaimTxHash = "";
   }
 
   /**
@@ -449,6 +504,10 @@ export function createRewardsController(options) {
         telemetryOverflow: rewardsState.eventOverflow,
       });
 
+      if (!rewardsState.txExplorerUrlTemplate) {
+        await syncPublicConfigFromBackend();
+      }
+
       setClaimStatus("Uploading run telemetry...");
       await flushSessionEvents(true);
 
@@ -473,8 +532,7 @@ export function createRewardsController(options) {
       });
 
       if (confirmed.status === "PAID") {
-        const txHash = confirmed.txHash ? ` tx=${confirmed.txHash}` : "";
-        setClaimStatus(`Claim approved and paid.${txHash}`);
+        setClaimStatusView(formatClaimStatusMessage(confirmed));
         stopClaimStatusPolling();
         return;
       }
@@ -486,8 +544,7 @@ export function createRewardsController(options) {
       }
 
       if (confirmed.status === "CONFIRMED") {
-        const txHash = confirmed.txHash ? ` tx=${confirmed.txHash}` : "";
-        setClaimStatus(`Claim approved. Payout is being finalized...${txHash}`);
+        setClaimStatusView(formatClaimStatusMessage(confirmed));
         startClaimStatusPolling(prepared.claimId);
         return;
       }

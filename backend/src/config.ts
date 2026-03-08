@@ -8,6 +8,7 @@ export type AppConfig = {
   massaOperationWait: "final" | "speculative";
   massaOperationTimeoutMs: number;
   massaOperationPollIntervalMs: number;
+  massaExplorerTxUrlTemplate: string;
   xPromoTweet: string;
   payoutDryRun: boolean;
   maxSinglePayoutAmount: number;
@@ -93,6 +94,7 @@ export function getConfig(env: EnvSource = process.env): AppConfig {
     massaOperationWait,
     massaOperationTimeoutMs: asNumber(env.MASSA_OPERATION_TIMEOUT_MS, 90_000),
     massaOperationPollIntervalMs: asNumber(env.MASSA_OPERATION_POLL_INTERVAL_MS, 1_500),
+    massaExplorerTxUrlTemplate: env.MASSA_EXPLORER_TX_URL_TEMPLATE?.trim() ?? "",
     xPromoTweet: env.X_PROMO_TWEET ?? "https://x.com/massalabs",
     payoutDryRun: String(env.PAYOUT_DRY_RUN ?? "true") !== "false",
     maxSinglePayoutAmount: asNumber(env.MAX_SINGLE_PAYOUT_AMOUNT, 300_000),
