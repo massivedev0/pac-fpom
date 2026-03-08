@@ -16,13 +16,14 @@ import { WALLET_CONNECT_TIMEOUT_MS } from "./constants.js";
  * @param {(address: string) => boolean} options.isValidMassaAddress Address validator callback
  * @param {() => Promise<Array<any>>} options.discoverWalletCandidates Wallet-provider discovery callback
  * @param {(candidate: any, options: { timeoutMs: number; isValidAddress: (address: string) => boolean }) => Promise<Array<{address: string; account: any}>>} options.getCandidateAccounts Account resolver callback
+ * @param {(candidate: any) => Promise<void>} options.resetWalletCandidate Wallet reset callback
  * @returns {{
  *   updateWalletStatusForClaimPanel: () => void;
  *   updateTopWalletButton: () => void;
  *   setTopWalletButtonVisible: (visible: boolean) => void;
  *   closeWalletModal: () => void;
  *   openWalletModal: () => Promise<void>;
- *   connectWalletAddress: (preferredWalletId?: string) => Promise<{status: "connected" | "select_account"; address?: string}>;
+ *   connectWalletAddress: (preferredWalletId?: string) => Promise<{status: "connected" | "select_account" | "cancelled"; address?: string}>;
  * }}
  */
 export function createWalletUiController(options) {
@@ -34,6 +35,7 @@ export function createWalletUiController(options) {
     isValidMassaAddress,
     discoverWalletCandidates,
     getCandidateAccounts,
+    resetWalletCandidate,
   } = options;
 
   const {
@@ -43,6 +45,7 @@ export function createWalletUiController(options) {
     walletModalSubtitle,
     walletOptions,
   } = dom;
+  let activeWalletFlowId = 0;
 
   /**
    * Shortens long wallet address with a centered ellipsis
@@ -125,6 +128,18 @@ export function createWalletUiController(options) {
   }
 
   /**
+   * Returns wallet candidates already shown in the modal, refreshing only when list is empty
+   *
+   * @returns {Promise<Array<any>>} Wallet candidates for the current connect flow
+   */
+  async function getConnectCandidates() {
+    if (Array.isArray(rewardsState.walletProviders) && rewardsState.walletProviders.length > 0) {
+      return rewardsState.walletProviders;
+    }
+    return refreshWalletProviders();
+  }
+
+  /**
    * Stores connected wallet identity and refreshes wallet UI
    *
    * @param {any} candidate Selected wallet candidate
@@ -136,6 +151,7 @@ export function createWalletUiController(options) {
     rewardsState.walletProvider = candidate.wallet || candidate.provider || null;
     rewardsState.walletAccount = walletAccount;
     rewardsState.walletProviderName = candidate.name;
+    rewardsState.pendingWalletCandidate = null;
     updateWalletStatusForClaimPanel();
     updateTopWalletButton();
     closeWalletModal();
@@ -150,9 +166,6 @@ export function createWalletUiController(options) {
     rewardsState.walletModalInFlight = pending;
     if (topWalletButton) {
       topWalletButton.disabled = pending;
-    }
-    if (walletModalClose) {
-      walletModalClose.disabled = pending;
     }
     if (walletOptions) {
       const actionButtons = walletOptions.querySelectorAll("button, select");
@@ -174,6 +187,26 @@ export function createWalletUiController(options) {
     const normalized = String(text || "").trim();
     walletModalSubtitle.textContent = normalized;
     walletModalSubtitle.hidden = normalized.length === 0;
+  }
+
+  /**
+   * Converts wallet-connect errors into user-facing status text
+   *
+   * @param {unknown} error Connect flow error
+   * @returns {string} Human-readable status text
+   */
+  function formatWalletConnectErrorMessage(error) {
+    const message = error instanceof Error ? error.message : "wallet_connect_failed";
+    if (message === "wallet_connect_cancelled") {
+      return "Wallet connection cancelled. Choose a wallet to try again";
+    }
+    if (message === "massa_wallet_not_found") {
+      return "No wallets found. Install/enable Massa Wallet or Bearby, then reload";
+    }
+    if (message === "wallet_provider_not_found") {
+      return "Selected wallet is no longer available. Choose a wallet to try again";
+    }
+    return `Wallet connection failed: ${message}`;
   }
 
   /**
@@ -233,43 +266,18 @@ export function createWalletUiController(options) {
   }
 
   /**
-   * Closes wallet selection modal
-   */
-  function closeWalletModal() {
-    if (walletModal) {
-      walletModal.hidden = true;
-    }
-  }
-
-  /**
-   * Opens wallet modal and renders detected providers
+   * Renders the provider selection list in the wallet modal
    *
-   * @returns {Promise<void>}
+   * @param {Array<any>} candidates Available wallet candidates
    */
-  async function openWalletModal() {
-    if (!walletModal || !walletOptions) {
+  function renderWalletProviderList(candidates) {
+    if (!walletOptions || !walletModal) {
       return;
     }
 
+    rewardsState.pendingWalletCandidate = null;
     setWalletModalSubtitle("");
     walletOptions.textContent = "";
-    setWalletModalPending(true);
-    walletModal.hidden = false;
-
-    const loading = document.createElement("p");
-    loading.className = "wallet-options-empty";
-    loading.textContent = "Searching available wallets...";
-    walletOptions.append(loading);
-
-    let candidates = [];
-    try {
-      candidates = await refreshWalletProviders();
-    } catch {
-      candidates = [];
-    }
-
-    walletOptions.textContent = "";
-    setWalletModalPending(false);
 
     if (candidates.length === 0) {
       const empty = document.createElement("p");
@@ -278,6 +286,7 @@ export function createWalletUiController(options) {
       walletOptions.append(empty);
       updateWalletStatusForClaimPanel();
       setClaimStatus("No wallets found. Install/enable Massa Wallet or Bearby, then reload.");
+      walletModal.hidden = false;
       return;
     }
 
@@ -295,8 +304,7 @@ export function createWalletUiController(options) {
             }
           })
           .catch((error) => {
-            const message = error instanceof Error ? error.message : "wallet_connect_failed";
-            setClaimStatus(`Wallet connection failed: ${message}`);
+            setClaimStatus(formatWalletConnectErrorMessage(error));
           });
       });
       walletOptions.append(button);
@@ -307,32 +315,120 @@ export function createWalletUiController(options) {
   }
 
   /**
+   * Closes wallet selection modal
+   */
+  function closeWalletModal() {
+    const hadPendingConnect = rewardsState.walletModalInFlight && Boolean(rewardsState.pendingWalletCandidate);
+    activeWalletFlowId += 1;
+    setWalletModalPending(false);
+    const pendingCandidate = rewardsState.pendingWalletCandidate || null;
+    rewardsState.pendingWalletCandidate = null;
+    if (walletModal) {
+      walletModal.hidden = true;
+    }
+    if (hadPendingConnect) {
+      setClaimStatus("Wallet connection cancelled. Choose a wallet to try again");
+    }
+    if (pendingCandidate) {
+      resetWalletCandidate(pendingCandidate).catch(() => {});
+    }
+  }
+
+  /**
+   * Starts a new wallet-modal async flow and invalidates older ones
+   *
+   * @returns {number} Active wallet flow id
+   */
+  function beginWalletFlow() {
+    activeWalletFlowId += 1;
+    return activeWalletFlowId;
+  }
+
+  /**
+   * Checks whether an async wallet flow is still current
+   *
+   * @param {number} flowId Wallet flow id
+   * @returns {boolean} True when async result still belongs to current modal flow
+   */
+  function isWalletFlowCurrent(flowId) {
+    return flowId === activeWalletFlowId;
+  }
+
+  /**
+   * Opens wallet modal and renders detected providers
+   *
+   * @returns {Promise<void>}
+   */
+  async function openWalletModal() {
+    if (!walletModal || !walletOptions) {
+      return;
+    }
+    const flowId = beginWalletFlow();
+
+    setWalletModalSubtitle("");
+    walletOptions.textContent = "";
+    rewardsState.pendingWalletCandidate = null;
+    setWalletModalPending(true);
+    walletModal.hidden = false;
+
+    const loading = document.createElement("p");
+    loading.className = "wallet-options-empty";
+    loading.textContent = "Searching available wallets...";
+    walletOptions.append(loading);
+
+    let candidates = [];
+    try {
+      candidates = await refreshWalletProviders();
+    } catch {
+      candidates = [];
+    }
+
+    if (!isWalletFlowCurrent(flowId)) {
+      return;
+    }
+    walletOptions.textContent = "";
+    setWalletModalPending(false);
+    renderWalletProviderList(candidates);
+  }
+
+  /**
    * Connects wallet provider and stores selected account in rewards state
    *
    * @param {string} [preferredWalletId] Candidate id selected in modal
-   * @returns {Promise<{status: "connected" | "select_account"; address?: string}>}
-   */
+ * @returns {Promise<{status: "connected" | "select_account" | "cancelled"; address?: string}>}
+  */
   async function connectWalletAddress(preferredWalletId = "") {
+    const flowId = beginWalletFlow();
     setWalletModalPending(true);
     try {
-      const candidates = await refreshWalletProviders();
+      const candidates = await getConnectCandidates();
+      if (!isWalletFlowCurrent(flowId)) {
+        return { status: "cancelled" };
+      }
       if (candidates.length === 0) {
         throw new Error("massa_wallet_not_found");
       }
 
-      const prioritizedCandidates = preferredWalletId
-        ? [
-            ...candidates.filter((candidate) => candidate.id === preferredWalletId),
-            ...candidates.filter((candidate) => candidate.id !== preferredWalletId),
-          ]
+      const hasExplicitSelection = preferredWalletId.trim().length > 0;
+      const prioritizedCandidates = hasExplicitSelection
+        ? candidates.filter((candidate) => candidate.id === preferredWalletId)
         : candidates;
+      if (hasExplicitSelection && prioritizedCandidates.length === 0) {
+        throw new Error("wallet_provider_not_found");
+      }
+
+      let lastError = null;
 
       for (const candidate of prioritizedCandidates) {
         try {
+          rewardsState.pendingWalletCandidate = candidate;
           const connectedAccounts = await getCandidateAccounts(candidate, {
             timeoutMs: WALLET_CONNECT_TIMEOUT_MS,
             isValidAddress: isValidMassaAddress,
           });
+          if (!isWalletFlowCurrent(flowId)) {
+            return { status: "cancelled" };
+          }
 
           if (connectedAccounts.length > 1) {
             renderWalletAccountPicker(candidate, connectedAccounts);
@@ -340,6 +436,12 @@ export function createWalletUiController(options) {
           }
 
           if (connectedAccounts.length === 0) {
+            lastError = new Error("wallet_connect_cancelled");
+            if (hasExplicitSelection) {
+              await resetWalletCandidate(candidate);
+              rewardsState.pendingWalletCandidate = null;
+              break;
+            }
             continue;
           }
 
@@ -347,14 +449,36 @@ export function createWalletUiController(options) {
           const walletAccount = connectedAccounts[0].account;
           applyConnectedWallet(candidate, address, walletAccount);
           return { status: "connected", address };
-        } catch {
-          // Try next provider if this one is unavailable or timed out.
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error("wallet_connect_failed");
+          if (hasExplicitSelection) {
+            await resetWalletCandidate(candidate);
+          }
+          rewardsState.pendingWalletCandidate = null;
+          if (!isWalletFlowCurrent(flowId)) {
+            return { status: "cancelled" };
+          }
+          if (hasExplicitSelection) {
+            break;
+          }
         }
       }
 
-      throw new Error("wallet_connect_failed");
+      if (hasExplicitSelection) {
+        if (prioritizedCandidates[0]) {
+          await resetWalletCandidate(prioritizedCandidates[0]);
+        }
+        rewardsState.pendingWalletCandidate = null;
+        if (!isWalletFlowCurrent(flowId)) {
+          return { status: "cancelled" };
+        }
+        renderWalletProviderList(candidates);
+      }
+      throw lastError || new Error("wallet_connect_failed");
     } finally {
-      setWalletModalPending(false);
+      if (isWalletFlowCurrent(flowId)) {
+        setWalletModalPending(false);
+      }
     }
   }
 

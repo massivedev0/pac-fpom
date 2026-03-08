@@ -39,13 +39,17 @@ export async function discoverWalletCandidates() {
     // Ignore SDK loader errors and keep legacy probing as fallback.
   }
 
-  const seen = new Set(candidates.map((entry) => entry.name.toLowerCase()));
+  const candidateIndexByName = new Map(candidates.map((entry, index) => [entry.name.toLowerCase(), index]));
   for (const legacyProvider of detectLegacyWalletProviders()) {
     const dedupeKey = legacyProvider.name.toLowerCase();
-    if (seen.has(dedupeKey)) {
+    const existingIndex = candidateIndexByName.get(dedupeKey);
+    if (existingIndex !== undefined) {
+      if (shouldPreferLegacyCandidate(candidates[existingIndex], legacyProvider)) {
+        candidates[existingIndex] = legacyProvider;
+      }
       continue;
     }
-    seen.add(dedupeKey);
+    candidateIndexByName.set(dedupeKey, candidates.length);
     candidates.push(legacyProvider);
   }
 
@@ -81,6 +85,44 @@ export async function getCandidateAccounts(candidate, options) {
     return legacyAccounts;
   } catch {
     return [];
+  }
+}
+
+/**
+ * Resets provider connection state after cancelled or failed connect attempts
+ *
+ * @param {WalletCandidate | null | undefined} candidate Wallet candidate to reset
+ * @returns {Promise<void>}
+ */
+export async function resetWalletCandidate(candidate) {
+  if (!candidate) {
+    return;
+  }
+
+  const tasks = [
+    async () => {
+      if (typeof candidate.wallet?.disconnect === "function") {
+        await candidate.wallet.disconnect();
+      }
+    },
+    async () => {
+      if (typeof candidate.provider?.disconnect === "function") {
+        await candidate.provider.disconnect();
+      }
+    },
+    async () => {
+      if (typeof candidate.provider?.wallet?.disconnect === "function") {
+        await candidate.provider.wallet.disconnect();
+      }
+    },
+  ];
+
+  for (const task of tasks) {
+    try {
+      await task();
+    } catch {
+      // Ignore reset errors and allow the next connect attempt.
+    }
   }
 }
 
@@ -198,6 +240,21 @@ function detectLegacyWalletProviders() {
   }
 
   return candidates;
+}
+
+/**
+ * Chooses whether a legacy candidate should replace an SDK candidate with the same UI label
+ *
+ * @param {WalletCandidate} existingCandidate Already collected candidate
+ * @param {WalletCandidate} legacyCandidate Legacy injected candidate
+ * @returns {boolean} True when legacy candidate should replace current one
+ */
+function shouldPreferLegacyCandidate(existingCandidate, legacyCandidate) {
+  if (!existingCandidate || !legacyCandidate) {
+    return false;
+  }
+
+  return existingCandidate.source === "wallet_provider" && legacyCandidate.source === "legacy";
 }
 
 /**

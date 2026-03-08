@@ -12,7 +12,7 @@ import {
 } from "./modules/constants.js";
 import { renderScene } from "./modules/render-system.js";
 import { isValidMassaAddress } from "./modules/rewards-helpers.js";
-import { discoverWalletCandidates, getCandidateAccounts } from "./modules/wallet-service.js";
+import { discoverWalletCandidates, getCandidateAccounts, resetWalletCandidate } from "./modules/wallet-service.js";
 import { createWalletUiController } from "./modules/wallet-ui.js";
 import { createRewardsController } from "./modules/rewards-controller.js";
 import { createOverlayUiController } from "./modules/overlay-ui.js";
@@ -197,6 +197,7 @@ const walletUi = createWalletUiController({
   isValidMassaAddress,
   discoverWalletCandidates,
   getCandidateAccounts,
+  resetWalletCandidate,
 });
 
 /**
