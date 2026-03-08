@@ -60,33 +60,71 @@ export const DIRS = Object.freeze({
 });
 
 /**
- * Base maze template (# wall, . pellet, * power pellet, space path).
+ * Default full-size arcade layout and spawn data
  * @readonly
  */
-export const MAZE_TEMPLATE = Object.freeze([
-  "############################",
-  "#............##............#",
-  "#.####.#####....#####.####.#",
-  "#*####.#####.##.#####.####*#",
-  "#..........................#",
-  "#.####.##.########.##.####.#",
-  "#......##....##....##......#",
-  "######.#####.##.#####.######",
-  "######.##..........##.######",
-  "######.##..........##.######",
-  "######.##..........##.######",
-  "#..........#....#..........#",
-  "#.####.#####.##.#####.####.#",
-  "#*..##................##..*#",
-  "###.##.##.########.##.##.###",
-  "#......##....##....##......#",
-  "#.##########.##.##########.#",
-  "#..........................#",
-  "############################",
-]);
+export const DEFAULT_GAME_VARIANT = Object.freeze({
+  id: "default",
+  mazeTemplate: Object.freeze([
+    "############################",
+    "#............##............#",
+    "#.####.#####....#####.####.#",
+    "#*####.#####.##.#####.####*#",
+    "#..........................#",
+    "#.####.##.########.##.####.#",
+    "#......##....##....##......#",
+    "######.#####.##.#####.######",
+    "######.##..........##.######",
+    "######.##..........##.######",
+    "######.##..........##.######",
+    "#..........#....#..........#",
+    "#.####.#####.##.#####.####.#",
+    "#*..##................##..*#",
+    "###.##.##.########.##.##.###",
+    "#......##....##....##......#",
+    "#.##########.##.##########.#",
+    "#..........................#",
+    "############################",
+  ]),
+  forcePowerPellet: Object.freeze({ row: 13, col: 14 }),
+  playerSpawn: Object.freeze({ row: 13, col: 14, dir: "left" }),
+  enemyRespawn: Object.freeze({ row: 9, col: 14 }),
+  enemyTypes: Object.freeze(["doge", "shiba", "pepe", "doge", "shiba", "pepe"]),
+  enemySpawnPoints: Object.freeze([
+    Object.freeze({ col: 13, row: 8, dir: "left" }),
+    Object.freeze({ col: 14, row: 8, dir: "right" }),
+    Object.freeze({ col: 12, row: 9, dir: "up" }),
+    Object.freeze({ col: 15, row: 9, dir: "down" }),
+    Object.freeze({ col: 11, row: 10, dir: "right" }),
+    Object.freeze({ col: 16, row: 10, dir: "left" }),
+  ]),
+});
 
 /**
- * Enemy spawn sequence
+ * Small local-only map for `?dev=2` quick reward-flow testing
  * @readonly
  */
-export const ENEMY_TYPES = Object.freeze(["doge", "shiba", "pepe", "doge", "shiba", "pepe"]);
+export const DEV_TEST_GAME_VARIANT = Object.freeze({
+  id: "dev_test",
+  mazeTemplate: Object.freeze([
+    "#############",
+    "#.....#.....#",
+    "#.###.#.###.#",
+    "#*..........#",
+    "#.###.#.###.#",
+    "#...#...#...#",
+    "#.###.#.###.#",
+    "#...........#",
+    "#.###.#.###.#",
+    "#.....#....*#",
+    "#############",
+  ]),
+  forcePowerPellet: null,
+  playerSpawn: Object.freeze({ row: 7, col: 1, dir: "right" }),
+  enemyRespawn: Object.freeze({ row: 3, col: 6 }),
+  enemyTypes: Object.freeze(["doge", "pepe"]),
+  enemySpawnPoints: Object.freeze([
+    Object.freeze({ col: 6, row: 3, dir: "left" }),
+    Object.freeze({ col: 7, row: 3, dir: "right" }),
+  ]),
+});

@@ -1,12 +1,12 @@
 import {
   BASE_HEIGHT,
   BASE_WIDTH,
+  DEFAULT_GAME_VARIANT,
   DEFAULT_DEBUG_WIN_SCORE,
   DEFAULT_X_PROMO_TWEET,
+  DEV_TEST_GAME_VARIANT,
   DIRS,
-  ENEMY_TYPES,
   FIXED_DT,
-  MAZE_TEMPLATE,
   SCORE_VALUES,
   TILE,
 } from "./modules/constants.js";
@@ -35,6 +35,41 @@ const claimButton = document.getElementById("claim-btn");
 const claimStatus = document.getElementById("claim-status");
 const devWinButton = document.getElementById("dev-win-btn");
 
+/**
+ * Checks whether current host is local-only
+ *
+ * @returns {boolean} True when running on localhost or loopback
+ */
+function isLocalHost() {
+  return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+}
+
+/**
+ * Reads local-only dev mode selector from query string
+ *
+ * @returns {string} Local dev mode value or empty string
+ */
+function getLocalDevMode() {
+  if (!isLocalHost()) {
+    return "";
+  }
+  return new URLSearchParams(window.location.search).get("dev") || "";
+}
+
+/**
+ * Chooses runtime game variant based on local query params
+ *
+ * @returns {typeof DEFAULT_GAME_VARIANT} Selected game variant
+ */
+function getGameVariant() {
+  if (getLocalDevMode() === "2") {
+    return DEV_TEST_GAME_VARIANT;
+  }
+  return DEFAULT_GAME_VARIANT;
+}
+
+const GAME_VARIANT = getGameVariant();
+const MAZE_TEMPLATE = GAME_VARIANT.mazeTemplate;
 const MAZE_ROWS = MAZE_TEMPLATE.length;
 const MAZE_COLS = MAZE_TEMPLATE[0].length;
 const MAZE_WIDTH = MAZE_COLS * TILE;
@@ -140,9 +175,7 @@ function applyPromoTweetUrl(url) {
  * Checks whether local debug tools are enabled
  */
 function isDebugToolsEnabled() {
-  const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-  const isDevParamEnabled = new URLSearchParams(window.location.search).get("dev") === "1";
-  return isLocalHost && isDevParamEnabled;
+  return getLocalDevMode() === "1";
 }
 
 // ------------------------------------------------------------
@@ -280,7 +313,12 @@ function initMaze() {
     for (let col = 0; col < MAZE_COLS; col += 1) {
       const ch = STATE.maze[row][col];
       if (ch === "." || ch === "*") {
-        const forcePower = row === 13 && col === 14;
+        const forcedPowerPellet = GAME_VARIANT.forcePowerPellet;
+        const forcePower = Boolean(
+          forcedPowerPellet &&
+            row === forcedPowerPellet.row &&
+            col === forcedPowerPellet.col,
+        );
         STATE.pellets.push({
           row,
           col,
@@ -307,14 +345,15 @@ function tileCenter(col, row) {
  * Creates initial player entity
  */
 function createPlayer() {
-  const spawn = tileCenter(14, 13);
+  const spawnPoint = GAME_VARIANT.playerSpawn;
+  const spawn = tileCenter(spawnPoint.col, spawnPoint.row);
   return {
     x: spawn.x,
     y: spawn.y,
     r: 13,
     speed: 128,
-    dir: "left",
-    desiredDir: "left",
+    dir: spawnPoint.dir,
+    desiredDir: spawnPoint.dir,
     mouthPhase: 0,
     alive: true,
   };
@@ -324,14 +363,7 @@ function createPlayer() {
  * Creates enemy entity by type and spawn index
  */
 function createEnemy(type, idx) {
-  const spawnPoints = [
-    { col: 13, row: 8, dir: "left" },
-    { col: 14, row: 8, dir: "right" },
-    { col: 12, row: 9, dir: "up" },
-    { col: 15, row: 9, dir: "down" },
-    { col: 11, row: 10, dir: "right" },
-    { col: 16, row: 10, dir: "left" },
-  ];
+  const spawnPoints = GAME_VARIANT.enemySpawnPoints;
   const point = spawnPoints[idx] ?? spawnPoints[0];
   const spawn = tileCenter(point.col, point.row);
   return {
@@ -352,7 +384,7 @@ function createEnemy(type, idx) {
  */
 function resetEntities() {
   STATE.player = createPlayer();
-  STATE.enemies = ENEMY_TYPES.map((type, i) => createEnemy(type, i));
+  STATE.enemies = GAME_VARIANT.enemyTypes.map((type, i) => createEnemy(type, i));
   STATE.powerTimer = 0;
   STATE.combo = 0;
   STATE.roundResetTimer = 0;
@@ -741,7 +773,7 @@ function handleEnemyCollisions() {
     if (STATE.powerTimer > 0) {
       spawnShatterEffect(enemy.x, enemy.y, enemy.r * 2.2, enemy.type, 14);
       enemy.respawnTimer = 2.8;
-      const spawn = tileCenter(14, 9);
+      const spawn = tileCenter(GAME_VARIANT.enemyRespawn.col, GAME_VARIANT.enemyRespawn.row);
       enemy.x = spawn.x;
       enemy.y = spawn.y;
       STATE.runStats.enemiesEaten += 1;
@@ -916,6 +948,9 @@ function renderGameToText() {
     effects_count: STATE.effects.length,
     round_reset_timer: Number(STATE.roundResetTimer.toFixed(2)),
     sample_active_pellets: activePellets,
+    maze_rows: MAZE_ROWS,
+    maze_cols: MAZE_COLS,
+    game_variant: GAME_VARIANT.id,
   });
 }
 
@@ -1105,7 +1140,7 @@ function init() {
   }
   window.render_game_to_text = renderGameToText;
   window.advanceTime = advanceTime;
-  window.__fpom_game = { state: STATE, walletUi, rewardsController };
+  window.__fpom_game = { state: STATE, walletUi, rewardsController, gameVariant: GAME_VARIANT.id };
   render();
 
   if (animationFrame) {
