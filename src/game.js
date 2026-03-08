@@ -1155,6 +1155,21 @@ function isTextInputElement(element) {
 }
 
 /**
+ * Checks whether an event target belongs to the visible reward claim panel
+ *
+ * @param {EventTarget | null} target Browser event target
+ * @returns {boolean} True when target is inside visible reward panel
+ */
+function isClaimPanelTarget(target) {
+  return Boolean(
+    rewardPanel &&
+      !rewardPanel.hidden &&
+      target instanceof Element &&
+      rewardPanel.contains(target),
+  );
+}
+
+/**
  * Handles keyboard keydown events for gameplay and UI
  */
 function onKeyDown(event) {
@@ -1162,11 +1177,18 @@ function onKeyDown(event) {
   keysPressed.add(code);
   const isTypingTarget = isTextInputElement(event.target);
   const isWalletModalOpen = Boolean(walletModal && !walletModal.hidden);
+  const isClaimTarget = isClaimPanelTarget(event.target);
 
   if (isWalletModalOpen) {
     if (code === "Escape") {
       walletUi.closeWalletModal();
     }
+    return;
+  }
+
+  if (code === "Enter" && STATE.mode === "won" && isClaimTarget) {
+    event.preventDefault();
+    rewardsController.submitRewardClaim(readClaimForm()).catch(() => {});
     return;
   }
 
