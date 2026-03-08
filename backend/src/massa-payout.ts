@@ -1,6 +1,23 @@
-import { Account, JsonRpcProvider, MRC20, Operation, OperationStatus } from "@massalabs/massa-web3";
+import {
+  Account,
+  JsonRpcProvider,
+  MRC20,
+  Operation,
+  OperationStatus,
+  formatMas,
+  formatUnits,
+} from "@massalabs/massa-web3";
 import { type FastifyBaseLogger } from "fastify";
 import { type AppConfig } from "./config.js";
+
+export type PayoutBalanceSnapshot = {
+  payoutAddress: string;
+  masBalanceRaw: string;
+  masBalanceMas: string;
+  fpomBalanceRaw: string;
+  fpomBalanceTokens: string;
+  tokenDecimals: number;
+};
 
 export type PayoutExecutionResult =
   | {
@@ -9,6 +26,8 @@ export type PayoutExecutionResult =
       rawAmount: string;
       tokenDecimals: number;
       observedStatus: string;
+      balanceSnapshot?: PayoutBalanceSnapshot;
+      projectedFpomBalanceRaw?: string;
     }
   | {
       outcome: "pending";
@@ -16,6 +35,8 @@ export type PayoutExecutionResult =
       rawAmount: string;
       tokenDecimals: number;
       observedStatus: string;
+      balanceSnapshot?: PayoutBalanceSnapshot;
+      projectedFpomBalanceRaw?: string;
     }
   | {
       outcome: "failed";
@@ -24,6 +45,8 @@ export type PayoutExecutionResult =
       tokenDecimals: number;
       observedStatus: string;
       error: string;
+      balanceSnapshot?: PayoutBalanceSnapshot;
+      projectedFpomBalanceRaw?: string;
     };
 
 export type PayoutReconcileResult =
@@ -46,6 +69,7 @@ export type PayoutReconcileResult =
 
 export type PayoutSender = {
   isConfigured: () => boolean;
+  getBalanceSnapshot?: () => Promise<PayoutBalanceSnapshot>;
   sendTokenPayout: (input: {
     claimId: string;
     recipientAddress: string;
@@ -59,6 +83,78 @@ type MassaRuntime = {
   token: MRC20;
   decimals: number;
 };
+
+/**
+ * Converts runtime balance value into bigint
+ *
+ * @param {bigint | { toString(): string }} value Bigint-like runtime balance
+ * @returns {bigint} Normalized bigint balance
+ */
+function toBigIntValue(value: bigint | { toString(): string }): bigint {
+  return typeof value === "bigint" ? value : BigInt(value.toString());
+}
+
+/**
+ * Builds balance snapshot for payout wallet
+ *
+ * @param {MassaRuntime} runtime Initialized Massa runtime
+ * @returns {Promise<PayoutBalanceSnapshot>} Current MAS and FPOM balances
+ */
+async function buildBalanceSnapshot(runtime: MassaRuntime): Promise<PayoutBalanceSnapshot> {
+  const { provider, token, decimals } = runtime;
+  const [masBalance, fpomBalance] = await Promise.all([
+    provider.balance(),
+    token.balanceOf(String(provider.address)),
+  ]);
+  const masBalanceRaw = toBigIntValue(masBalance);
+  const fpomBalanceRaw = toBigIntValue(fpomBalance);
+
+  return {
+    payoutAddress: String(provider.address),
+    masBalanceRaw: masBalanceRaw.toString(),
+    masBalanceMas: formatMas(masBalanceRaw),
+    fpomBalanceRaw: fpomBalanceRaw.toString(),
+    fpomBalanceTokens: formatUnits(fpomBalanceRaw, decimals),
+    tokenDecimals: decimals,
+  };
+}
+
+/**
+ * Classifies payout failure into a readable machine-friendly reason
+ *
+ * @param {unknown} error Unknown thrown value
+ * @returns {string} Classified error reason
+ */
+function classifyPayoutError(error: unknown): string {
+  if (error instanceof Error) {
+    const rawMessage = `${error.name}:${error.message}`.replace(/\s+/g, " ").trim();
+    const normalized = rawMessage.toLowerCase();
+
+    if (error.name === "ErrorInsufficientBalance") {
+      return `insufficient_mas_balance:${error.message}`;
+    }
+    if (
+      normalized.includes("timeout") ||
+      normalized.includes("abort") ||
+      normalized.includes("timed out")
+    ) {
+      return `rpc_timeout:${rawMessage}`;
+    }
+    if (
+      normalized.includes("fetch failed") ||
+      normalized.includes("network") ||
+      normalized.includes("econnrefused") ||
+      normalized.includes("enotfound") ||
+      normalized.includes("socket")
+    ) {
+      return `rpc_unreachable:${rawMessage}`;
+    }
+
+    return rawMessage || "payout_error";
+  }
+
+  return String(error || "payout_error");
+}
 
 /**
  * Converts Massa web3 enum value into readable label
@@ -198,42 +294,54 @@ export function createMassaPayoutSender(
       return true;
     },
 
+    async getBalanceSnapshot() {
+      return buildBalanceSnapshot(await getRuntime());
+    },
+
     async sendTokenPayout(input) {
-      const { token, decimals, provider } = await getRuntime();
+      const runtime = await getRuntime();
+      const { token, decimals } = runtime;
       const rawAmount = toRawTokenAmount(input.amountTokens, decimals);
-      const operation = await token.transfer(input.recipientAddress, rawAmount);
-      const txHash = operation.id;
-      const observedStatus = await waitOperationStatus(txHash, provider);
-      const observedStatusLabel = mapOperationStatusLabel(observedStatus);
-
-      if (isFinalSuccessStatus(observedStatus)) {
-        return {
-          outcome: "paid",
-          txHash,
-          rawAmount: rawAmount.toString(),
-          tokenDecimals: decimals,
-          observedStatus: observedStatusLabel,
-        };
-      }
-
-      if (isFailureStatus(observedStatus)) {
+      const balanceSnapshot = await buildBalanceSnapshot(runtime);
+      const fpomBalanceRaw = BigInt(balanceSnapshot.fpomBalanceRaw);
+      if (fpomBalanceRaw < rawAmount) {
         return {
           outcome: "failed",
-          txHash,
+          txHash: undefined,
           rawAmount: rawAmount.toString(),
           tokenDecimals: decimals,
-          observedStatus: observedStatusLabel,
-          error: `operation_failed:${observedStatusLabel}`,
+          observedStatus: "PRECHECK_FAILED",
+          error: `insufficient_fpom_balance:have=${balanceSnapshot.fpomBalanceTokens}:need=${formatUnits(rawAmount, decimals)}`,
+          balanceSnapshot,
+          projectedFpomBalanceRaw: balanceSnapshot.fpomBalanceRaw,
         };
       }
 
-      return {
-        outcome: "pending",
-        txHash,
-        rawAmount: rawAmount.toString(),
-        tokenDecimals: decimals,
-        observedStatus: observedStatusLabel,
-      };
+      try {
+        const operation = await token.transfer(input.recipientAddress, rawAmount);
+        const txHash = operation.id;
+
+        return {
+          outcome: "pending",
+          txHash,
+          rawAmount: rawAmount.toString(),
+          tokenDecimals: decimals,
+          observedStatus: "SUBMITTED",
+          balanceSnapshot,
+          projectedFpomBalanceRaw: (fpomBalanceRaw - rawAmount).toString(),
+        };
+      } catch (error) {
+        return {
+          outcome: "failed",
+          txHash: undefined,
+          rawAmount: rawAmount.toString(),
+          tokenDecimals: decimals,
+          observedStatus: "SUBMIT_FAILED",
+          error: classifyPayoutError(error),
+          balanceSnapshot,
+          projectedFpomBalanceRaw: balanceSnapshot.fpomBalanceRaw,
+        };
+      }
     },
 
     async reconcilePayout(txHash) {

@@ -3,7 +3,11 @@ import { PrismaClient } from "@prisma/client";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { type AppConfig, getConfig } from "./config.js";
-import { createMassaPayoutSender, type PayoutSender } from "./massa-payout.js";
+import {
+  createMassaPayoutSender,
+  type PayoutBalanceSnapshot,
+  type PayoutSender,
+} from "./massa-payout.js";
 import { computeServerScore, normalizeRunSummary } from "./scoring.js";
 import {
   extractIpFromRequest,
@@ -13,6 +17,10 @@ import {
   safeEqual,
   sha256Hex,
 } from "./utils.js";
+
+const BALANCE_ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const BALANCE_MONITOR_INTERVAL_MS = 60 * 60 * 1000;
+const RECONCILIATION_RETRY_DELAY_MS = 30 * 1000;
 
 const VERIFICATION_MODES = {
   wallet_signature: "wallet_signature",
@@ -83,6 +91,7 @@ type CreateAppOptions = {
   config?: AppConfig;
   prisma?: PrismaClient;
   payoutSender?: PayoutSender | null;
+  enableBackgroundWorkers?: boolean;
 };
 
 type PayoutContext = {
@@ -96,6 +105,8 @@ type PayoutContext = {
   txHash?: string;
   dryRun?: boolean;
   reason?: string;
+  balanceSnapshot?: PayoutBalanceSnapshot | null;
+  projectedFpomBalanceRaw?: string;
 };
 
 type ManualReviewAction = "approve" | "reject";
@@ -399,9 +410,60 @@ function formatSlackPayoutMessage(context: PayoutContext): string {
     `Verification: ${context.verificationMode}`,
     context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
     context.txHash ? `Tx hash: ${context.txHash}` : undefined,
+    context.balanceSnapshot ? `Payout wallet MAS: ${context.balanceSnapshot.masBalanceMas}` : undefined,
+    context.balanceSnapshot
+      ? `Payout wallet FPOM: ${context.balanceSnapshot.fpomBalanceTokens}`
+      : undefined,
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * Converts technical payout/manual-review reason into human-readable text
+ *
+ * @param {string | undefined} reason Machine-friendly reason
+ * @returns {string} Human-readable reason
+ */
+function describeReason(reason: string | undefined): string {
+  const value = String(reason || "unknown").trim();
+  const lower = value.toLowerCase();
+
+  if (lower.startsWith("rpc_unreachable:")) {
+    return `RPC node is unreachable: ${value.slice("rpc_unreachable:".length)}`;
+  }
+  if (lower.startsWith("rpc_timeout:")) {
+    return `RPC node timed out: ${value.slice("rpc_timeout:".length)}`;
+  }
+  if (lower.startsWith("insufficient_mas_balance:")) {
+    return `Not enough MAS for gas: ${value.slice("insufficient_mas_balance:".length)}`;
+  }
+  if (lower.startsWith("insufficient_fpom_balance:")) {
+    return `Not enough FPOM in payout wallet: ${value.slice("insufficient_fpom_balance:".length)}`;
+  }
+  if (lower.startsWith("onchain_payout_failed:")) {
+    return `On-chain payout failed: ${describeReason(value.slice("onchain_payout_failed:".length))}`;
+  }
+  if (lower.startsWith("operation_failed:")) {
+    return `Operation failed: ${value.slice("operation_failed:".length)}`;
+  }
+  if (lower.startsWith("single_payout_limit_exceeded:")) {
+    return `Single payout exceeds limit ${value.slice("single_payout_limit_exceeded:".length)} FPOM`;
+  }
+  if (lower.startsWith("daily_payout_limit_exceeded:")) {
+    return `Daily payout limit reached: ${value.slice("daily_payout_limit_exceeded:".length)}`;
+  }
+  if (lower === "real_payout_not_configured") {
+    return "Real payout sender is not configured";
+  }
+  if (lower === "risk_threshold_exceeded") {
+    return "Claim exceeded automatic risk threshold";
+  }
+  if (lower === "missing_x_profile") {
+    return "Claim is missing X profile";
+  }
+
+  return value;
 }
 
 /**
@@ -417,7 +479,7 @@ function formatSlackManualReviewMessage(config: AppConfig, context: PayoutContex
 
   return [
     "FPOM manual review requested",
-    `Reason: ${context.reason ?? "unknown"}`,
+    `Reason: ${describeReason(context.reason)}`,
     `Claim ID: ${context.claimId}`,
     `Session ID: ${context.sessionId}`,
     `Address: ${context.address}`,
@@ -425,8 +487,42 @@ function formatSlackManualReviewMessage(config: AppConfig, context: PayoutContex
     `Amount: ${context.amount.toLocaleString("en-US")} FPOM`,
     `Verification: ${context.verificationMode}`,
     context.riskScore === undefined ? undefined : `Risk score: ${context.riskScore}`,
+    context.txHash ? `Tx hash: ${context.txHash}` : undefined,
+    context.balanceSnapshot ? `Payout wallet MAS: ${context.balanceSnapshot.masBalanceMas}` : undefined,
+    context.balanceSnapshot
+      ? `Payout wallet FPOM: ${context.balanceSnapshot.fpomBalanceTokens}`
+      : undefined,
     approveLink ? `Approve: ${approveLink}` : undefined,
     rejectLink ? `Reject: ${rejectLink}` : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Formats Slack message for low-balance alerts
+ *
+ * @param {{
+ *   source: string;
+ *   thresholdTokens: number;
+ *   balanceSnapshot: PayoutBalanceSnapshot;
+ *   currentFpomTokens: string;
+ * }} input Low-balance alert context
+ * @returns {string} Slack message text
+ */
+function formatSlackLowBalanceMessage(input: {
+  source: string;
+  thresholdTokens: number;
+  balanceSnapshot: PayoutBalanceSnapshot;
+  currentFpomTokens: string;
+}): string {
+  return [
+    "FPOM payout wallet balance is low",
+    `Source: ${input.source}`,
+    `Threshold: ${input.thresholdTokens.toLocaleString("en-US")} FPOM`,
+    `Current FPOM balance: ${input.currentFpomTokens}`,
+    `Current MAS balance: ${input.balanceSnapshot.masBalanceMas}`,
+    `Payout wallet: ${input.balanceSnapshot.payoutAddress}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -483,10 +579,13 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const prisma = options.prisma ?? new PrismaClient();
   const app = Fastify({ logger: createLoggerOptions(config) });
   const payoutSender = options.payoutSender ?? createMassaPayoutSender(config, app.log);
+  const enableBackgroundWorkers = options.enableBackgroundWorkers ?? true;
   const writeAuditLog = createAuditWriter(prisma, app.log);
   const allowedOrigins = new Set(config.corsAllowedOrigins);
   const corsMethods = "GET,POST,OPTIONS";
   const corsHeaders = "content-type";
+  let balanceMonitorTimer: NodeJS.Timeout | null = null;
+  const payoutReconciliationTimers = new Map<string, NodeJS.Timeout>();
 
   app.addHook("onRequest", async (req, reply) => {
     const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
@@ -508,6 +607,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   });
 
   app.addHook("onClose", async () => {
+    if (balanceMonitorTimer) {
+      clearInterval(balanceMonitorTimer);
+      balanceMonitorTimer = null;
+    }
+    for (const timer of payoutReconciliationTimers.values()) {
+      clearTimeout(timer);
+    }
+    payoutReconciliationTimers.clear();
     await prisma.$disconnect();
   });
 
@@ -761,7 +868,133 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     claimId: string;
     signature?: string;
     txHash?: string;
+    balanceSnapshot?: PayoutBalanceSnapshot | null;
+    projectedFpomBalanceRaw?: string;
   };
+
+  /**
+   * Loads current payout wallet balance snapshot when sender supports it
+   *
+   * @returns {Promise<PayoutBalanceSnapshot | null>} Current balance snapshot or null
+   */
+  async function getCurrentBalanceSnapshot(): Promise<PayoutBalanceSnapshot | null> {
+    if (!payoutSender?.getBalanceSnapshot) {
+      return null;
+    }
+
+    try {
+      return await payoutSender.getBalanceSnapshot();
+    } catch (error) {
+      app.log.warn({ err: error }, "Failed to load payout wallet balances");
+      return null;
+    }
+  }
+
+  /**
+   * Sends low-balance alert at most once per 24 hours
+   *
+   * @param {string} source Alert source label
+   * @param {PayoutBalanceSnapshot | null} [balanceSnapshot] Optional preloaded balance snapshot
+   * @param {string} [projectedFpomBalanceRaw] Optional projected FPOM balance after queued payout
+   * @returns {Promise<void>}
+   */
+  async function notifyLowBalanceIfNeeded(
+    source: string,
+    balanceSnapshot?: PayoutBalanceSnapshot | null,
+    projectedFpomBalanceRaw?: string,
+  ): Promise<void> {
+    if (config.notifyBalanceBelow <= 0 || !config.slackWebhookUrl || !payoutSender?.getBalanceSnapshot) {
+      return;
+    }
+
+    const snapshot = balanceSnapshot ?? (await getCurrentBalanceSnapshot());
+    if (!snapshot) {
+      return;
+    }
+
+    const thresholdTokens = Math.max(0, Math.floor(config.notifyBalanceBelow));
+    const tokenDecimals = snapshot.tokenDecimals;
+    const thresholdRaw = BigInt(thresholdTokens) * 10n ** BigInt(tokenDecimals);
+    const currentRaw = BigInt(projectedFpomBalanceRaw ?? snapshot.fpomBalanceRaw);
+    if (currentRaw >= thresholdRaw) {
+      return;
+    }
+
+    const recentAlert = await prisma.auditLog.findFirst({
+      where: {
+        event: "BALANCE_LOW_ALERT_SENT",
+        createdAt: { gte: new Date(Date.now() - BALANCE_ALERT_COOLDOWN_MS) },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    if (recentAlert) {
+      return;
+    }
+
+    const currentFpomTokens = (() => {
+      const value = currentRaw.toString().padStart(tokenDecimals + 1, "0");
+      const whole = value.slice(0, -tokenDecimals) || "0";
+      const fraction = value.slice(-tokenDecimals).replace(/0+$/, "");
+      return fraction ? `${whole}.${fraction}` : whole;
+    })();
+
+    await sendSlackNotification(
+      app,
+      config,
+      formatSlackLowBalanceMessage({
+        source,
+        thresholdTokens,
+        balanceSnapshot: snapshot,
+        currentFpomTokens,
+      }),
+    );
+
+    await writeAuditLog({
+      level: "WARN",
+      event: "BALANCE_LOW_ALERT_SENT",
+      payload: {
+        source,
+        thresholdTokens,
+        payoutAddress: snapshot.payoutAddress,
+        masBalanceMas: snapshot.masBalanceMas,
+        fpomBalanceTokens: currentFpomTokens,
+        projected: Boolean(projectedFpomBalanceRaw),
+      },
+    });
+  }
+
+  /**
+   * Clears scheduled reconciliation retry for claim
+   *
+   * @param {string} claimId Claim id
+   */
+  function clearPayoutReconciliationTimer(claimId: string): void {
+    const timer = payoutReconciliationTimers.get(claimId);
+    if (!timer) {
+      return;
+    }
+
+    clearTimeout(timer);
+    payoutReconciliationTimers.delete(claimId);
+  }
+
+  /**
+   * Schedules reconciliation retry for still-pending payout
+   *
+   * @param {string} claimId Claim id
+   * @param {string} txHash Submitted transaction hash
+   */
+  function queuePayoutReconciliationRetry(claimId: string, txHash: string): void {
+    clearPayoutReconciliationTimer(claimId);
+    const timer = setTimeout(() => {
+      payoutReconciliationTimers.delete(claimId);
+      schedulePayoutFinalization(claimId, txHash);
+    }, RECONCILIATION_RETRY_DELAY_MS);
+    if (typeof timer.unref === "function") {
+      timer.unref();
+    }
+    payoutReconciliationTimers.set(claimId, timer);
+  }
 
   /**
    * Moves claim into manual review and sends admin notification
@@ -771,6 +1004,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
    * @returns {Promise<{ status: string; reason: string; txHash?: string | null }>} Manual review response payload
    */
   async function markAsManualReview(input: ReviewInput, reason: string) {
+    const balanceSnapshot = input.balanceSnapshot ?? (await getCurrentBalanceSnapshot());
     const claim = await prisma.claim.update({
       where: { id: input.claimId },
       data: {
@@ -791,6 +1025,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         amount: claim.amount,
         verificationMode: claim.verificationMode,
         xProfile: claim.xProfile,
+        balanceSnapshot,
       },
     });
 
@@ -807,6 +1042,9 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         verificationMode: claim.verificationMode,
         riskScore: run?.riskScore ?? null,
         reason,
+        txHash: claim.txHash ?? input.txHash,
+        balanceSnapshot,
+        projectedFpomBalanceRaw: input.projectedFpomBalanceRaw,
       }),
     );
 
@@ -983,8 +1221,25 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       },
     });
 
+    const balanceSnapshot = (extraPayload?.balanceSnapshot as PayoutBalanceSnapshot | undefined) ?? null;
+    await notifyLowBalanceIfNeeded(
+      "payout_failed",
+      balanceSnapshot,
+      typeof extraPayload?.projectedFpomBalanceRaw === "string"
+        ? extraPayload.projectedFpomBalanceRaw
+        : undefined,
+    );
+
     return markAsManualReview(
-      { claimId, txHash },
+      {
+        claimId,
+        txHash,
+        balanceSnapshot,
+        projectedFpomBalanceRaw:
+          typeof extraPayload?.projectedFpomBalanceRaw === "string"
+            ? extraPayload.projectedFpomBalanceRaw
+            : undefined,
+      },
       `onchain_payout_failed:${errorMessage}`,
     );
   }
@@ -1023,6 +1278,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         riskScore: run?.riskScore ?? null,
         txHash,
         dryRun,
+        balanceSnapshot: await getCurrentBalanceSnapshot(),
       }),
     );
   }
@@ -1037,11 +1293,13 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     if (!payoutSender || config.payoutDryRun) {
       return;
     }
+    clearPayoutReconciliationTimer(claimId);
 
     void payoutSender
       .reconcilePayout(txHash)
       .then(async (reconciliation) => {
         if (reconciliation.outcome === "paid") {
+          clearPayoutReconciliationTimer(claimId);
           await markPayoutPaid(
             claimId,
             reconciliation.txHash,
@@ -1055,6 +1313,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         }
 
         if (reconciliation.outcome === "failed") {
+          clearPayoutReconciliationTimer(claimId);
           await markPayoutFailed(
             claimId,
             reconciliation.error,
@@ -1063,9 +1322,13 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
               observedStatus: reconciliation.observedStatus,
             },
           );
+          return;
         }
+
+        queuePayoutReconciliationRetry(claimId, txHash);
       })
       .catch(async (error) => {
+        clearPayoutReconciliationTimer(claimId);
         const reason = error instanceof Error ? error.message : "reconcile_failed";
         app.log.warn({ err: error, claimId, txHash }, "Background payout reconciliation failed");
         await markPayoutFailed(claimId, reason, txHash, {
@@ -1238,8 +1501,15 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
             observedStatus: payoutResult.observedStatus,
             rawAmount: payoutResult.rawAmount,
             tokenDecimals: payoutResult.tokenDecimals,
+            balanceSnapshot: payoutResult.balanceSnapshot,
+            projectedFpomBalanceRaw: payoutResult.projectedFpomBalanceRaw,
           },
           "PAYOUT_PAID_ONCHAIN",
+        );
+        await notifyLowBalanceIfNeeded(
+          "payout_paid",
+          payoutResult.balanceSnapshot ?? null,
+          payoutResult.projectedFpomBalanceRaw,
         );
         await notifyPayoutPaid(claimId, payoutResult.txHash, false);
 
@@ -1255,7 +1525,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           observedStatus: payoutResult.observedStatus,
           rawAmount: payoutResult.rawAmount,
           tokenDecimals: payoutResult.tokenDecimals,
+          balanceSnapshot: payoutResult.balanceSnapshot,
+          projectedFpomBalanceRaw: payoutResult.projectedFpomBalanceRaw,
         });
+        await notifyLowBalanceIfNeeded(
+          "payout_submitted",
+          payoutResult.balanceSnapshot ?? null,
+          payoutResult.projectedFpomBalanceRaw,
+        );
         schedulePayoutFinalization(claimId, payoutResult.txHash);
 
         return {
@@ -1273,12 +1550,90 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           observedStatus: payoutResult.observedStatus,
           rawAmount: payoutResult.rawAmount,
           tokenDecimals: payoutResult.tokenDecimals,
+          balanceSnapshot: payoutResult.balanceSnapshot,
+          projectedFpomBalanceRaw: payoutResult.projectedFpomBalanceRaw,
         },
       );
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown_payout_error";
       return markPayoutFailed(claimId, reason);
     }
+  }
+
+  /**
+   * Resumes queued or confirmed payouts after backend restart
+   *
+   * @returns {Promise<void>}
+   */
+  async function recoverPersistedPayoutState(): Promise<void> {
+    if (!payoutSender || config.payoutDryRun) {
+      return;
+    }
+
+    const recoverableClaims = await prisma.claim.findMany({
+      where: {
+        OR: [
+          { status: CLAIM_STATUSES.CONFIRMED },
+          { payoutJob: { is: { status: PAYOUT_STATUSES.QUEUED } } },
+        ],
+      },
+      include: { payoutJob: true },
+      orderBy: [{ updatedAt: "asc" }, { createdAt: "asc" }],
+    });
+
+    for (const claim of recoverableClaims) {
+      if (claim.txHash) {
+        await writeAuditLog({
+          event: "PAYOUT_RECOVERY_RECONCILE_SCHEDULED",
+          claimId: claim.id,
+          sessionId: claim.sessionId,
+          address: claim.address,
+          payload: {
+            status: claim.status,
+            txHash: claim.txHash,
+            payoutJobStatus: claim.payoutJob?.status ?? null,
+          },
+        });
+        schedulePayoutFinalization(claim.id, claim.txHash);
+        continue;
+      }
+
+      await writeAuditLog({
+        event: "PAYOUT_RECOVERY_RETRY_ENQUEUED",
+        claimId: claim.id,
+        sessionId: claim.sessionId,
+        address: claim.address,
+        payload: {
+          status: claim.status,
+          payoutJobStatus: claim.payoutJob?.status ?? null,
+        },
+      });
+
+      void enqueueAndProcessPayout(claim.id).catch((error) => {
+        app.log.error({ err: error, claimId: claim.id }, "Failed to recover payout after restart");
+      });
+    }
+  }
+
+  if (enableBackgroundWorkers) {
+    app.addHook("onReady", async () => {
+      await recoverPersistedPayoutState().catch((error) => {
+        app.log.error({ err: error }, "Failed to recover persisted payout state");
+      });
+      await notifyLowBalanceIfNeeded("startup").catch((error) => {
+        app.log.warn({ err: error }, "Failed to check low payout balance on startup");
+      });
+
+      balanceMonitorTimer = setInterval(() => {
+        notifyLowBalanceIfNeeded("interval").catch((error) => {
+          app.log.warn({ err: error }, "Failed to check low payout balance on interval");
+        });
+      }, BALANCE_MONITOR_INTERVAL_MS);
+
+      if (typeof balanceMonitorTimer.unref === "function") {
+        balanceMonitorTimer.unref();
+      }
+    });
   }
 
   app.post("/claim/confirm", async (req, reply) => {

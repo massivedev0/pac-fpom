@@ -17,6 +17,9 @@ A simple backend for issuing FPOM rewards after a completed round
 - Manual review guardrails for oversized payout and daily payout volume
 - Audit log table in DB for claim verification and payout events
 - Slack webhook notifications for payout and manual review events
+- Low-balance alert for payout wallet with 24h cooldown
+- Failed payout alert details include classified reason and current payout-wallet balances
+- Startup recovery resumes persisted `QUEUED` and `CONFIRMED` payouts from SQLite after backend restart
 - Secure approve/reject links for manual review in Slack notifications
 - CLI log viewer with fixed-width columns and colors
 
@@ -64,6 +67,8 @@ Current coverage includes:
 - Happy path claim and dry-run payout
 - Happy path claim and real payout path through mocked on-chain sender
 - Pending on-chain payout reconciliation through `GET /claim/:claimId`
+- Low-balance alert cooldown
+- Startup payout recovery after backend restart
 - Default claim flow without wallet signature prompt
 - Address limit of 2 successful claims
 - Signature requirement for `wallet_signature`
@@ -98,6 +103,7 @@ Main ones:
 - `MASSA_OPERATION_WAIT`
 - `MASSA_OPERATION_TIMEOUT_MS`
 - `MASSA_OPERATION_POLL_INTERVAL_MS`
+- `NOTIFY_BALANCE_BELOW`
 - `MAX_SINGLE_PAYOUT_AMOUNT`
 - `MAX_PAYOUTS_PER_DAY`
 - `X_PROMO_TWEET`
@@ -110,7 +116,12 @@ Main ones:
 - `LOG_LEVEL`
 - `PRETTY_LOGS`
 
+## Restart behavior
+
+- Claim state, payout jobs, audit logs, and manual-review decisions are persisted in SQLite
+- On startup the backend resumes `QUEUED` payouts and rechecks `CONFIRMED` payouts with stored `txHash`
+- `PAID` and `REJECTED` claims stay terminal across restarts
+
 ## Next step
 
 - Optional signature verification for legacy `wallet_signature` via massa-web3
-- Background reconciliation worker instead of on-demand reconciliation during `GET /claim/:claimId`

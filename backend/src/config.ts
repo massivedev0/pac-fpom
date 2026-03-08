@@ -13,6 +13,7 @@ export type AppConfig = {
   maxSinglePayoutAmount: number;
   maxPayoutsPerDay: number;
   slackWebhookUrl: string;
+  notifyBalanceBelow: number;
   adminReviewBaseUrl: string;
   adminReviewSecret: string;
   maxClaimsPerAddress: number;
@@ -34,7 +35,8 @@ type EnvSource = Record<string, string | undefined>;
  * @returns {number} Parsed numeric value or fallback
  */
 function asNumber(value: string | undefined, fallback: number): number {
-  const parsed = Number(value);
+  const normalized = typeof value === "string" ? value.replaceAll("_", "").trim() : value;
+  const parsed = Number(normalized);
   if (Number.isFinite(parsed)) {
     return parsed;
   }
@@ -96,6 +98,7 @@ export function getConfig(env: EnvSource = process.env): AppConfig {
     maxSinglePayoutAmount: asNumber(env.MAX_SINGLE_PAYOUT_AMOUNT, 300_000),
     maxPayoutsPerDay: asNumber(env.MAX_PAYOUTS_PER_DAY, 50),
     slackWebhookUrl: env.SLACK_WEBHOOK_URL ?? "",
+    notifyBalanceBelow: asNumber(env.NOTIFY_BALANCE_BELOW, 0),
     adminReviewBaseUrl: (env.ADMIN_REVIEW_BASE_URL ?? "").replace(/\/+$/, ""),
     adminReviewSecret: env.ADMIN_REVIEW_SECRET ?? "",
     maxClaimsPerAddress: asNumber(env.MAX_CLAIMS_PER_ADDRESS, 2),
