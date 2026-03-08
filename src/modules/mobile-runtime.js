@@ -44,14 +44,17 @@ function computeShellWidth(baseWidth, baseHeight, isMobile) {
  * Builds menu hint copy for current runtime
  *
  * @param {boolean} isMobile True when mobile hints should be shown
+ * @param {boolean} isLandscape True when viewport is already landscape-oriented
  * @returns {{ html: string; primaryLine: string; secondaryLine: string; startLine: string }}
  */
-function buildControlsCopy(isMobile) {
+function buildControlsCopy(isMobile, isLandscape) {
   if (isMobile) {
     return {
-      html: "Swipe to move · Eat red orbs to hunt<br />Rotate to landscape for full view",
-      primaryLine: "Swipe to move  |  Eat red orbs to hunt",
-      secondaryLine: "Rotate to landscape for full view",
+      html: isLandscape
+        ? "Swipe or tap to move · Eat red orbs to hunt<br />Tap Pause to stop the run"
+        : "Swipe or tap to move · Eat red orbs to hunt<br />Rotate to landscape for full view",
+      primaryLine: "Swipe or tap to move  |  Eat red orbs to hunt",
+      secondaryLine: isLandscape ? "Tap Pause to stop the run" : "Rotate to landscape for full view",
       startLine: "Tap Start Hunt",
     };
   }
@@ -77,6 +80,7 @@ function buildControlsCopy(isMobile) {
  * @param {number} options.baseHeight Base game height
  * @param {() => boolean} options.shouldAcceptSwipe Swipe gate callback
  * @param {(dir: "left" | "right" | "up" | "down") => void} options.onDirectionInput Direction input callback
+ * @param {() => { x: number; y: number } | null} options.getTapReferencePoint Point used to resolve tap direction
  * @param {() => void} options.onRuntimeStateChange UI sync callback after layout/runtime updates
  * @returns {{
  *   applyLayout: () => void;
@@ -96,6 +100,7 @@ export function createMobileRuntimeController(options) {
     baseHeight,
     shouldAcceptSwipe,
     onDirectionInput,
+    getTapReferencePoint,
     onRuntimeStateChange,
   } = options;
 
@@ -111,7 +116,7 @@ export function createMobileRuntimeController(options) {
     runtimeState.isLandscape = isLandscapeViewport();
     runtimeState.rotateNoticeVisible = runtimeState.isMobile && !runtimeState.isLandscape;
 
-    const controlsCopy = buildControlsCopy(runtimeState.isMobile);
+    const controlsCopy = buildControlsCopy(runtimeState.isMobile, runtimeState.isLandscape);
     runtimeState.controlsHintHtml = controlsCopy.html;
     runtimeState.controlsBannerPrimary = controlsCopy.primaryLine;
     runtimeState.controlsBannerSecondary = controlsCopy.secondaryLine;
@@ -208,6 +213,27 @@ export function createMobileRuntimeController(options) {
 
     touchActive = false;
     if (Math.max(absX, absY) < MOBILE_TOUCH_SWIPE_THRESHOLD) {
+      const referencePoint = getTapReferencePoint?.();
+      if (!referencePoint) {
+        return;
+      }
+
+      const tapDeltaX = touch.clientX - referencePoint.x;
+      const tapDeltaY = touch.clientY - referencePoint.y;
+      const tapAbsX = Math.abs(tapDeltaX);
+      const tapAbsY = Math.abs(tapDeltaY);
+
+      if (Math.max(tapAbsX, tapAbsY) < 10) {
+        return;
+      }
+
+      event.preventDefault();
+      if (tapAbsX > tapAbsY) {
+        onDirectionInput(tapDeltaX > 0 ? "right" : "left");
+        return;
+      }
+
+      onDirectionInput(tapDeltaY > 0 ? "down" : "up");
       return;
     }
 

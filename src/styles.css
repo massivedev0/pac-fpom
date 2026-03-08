@@ -74,6 +74,26 @@ body {
   opacity: 0.95;
 }
 
+.mobile-pause-btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 4;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-family: "Bungee", sans-serif;
+  font-size: 15px;
+  color: #fff;
+  cursor: pointer;
+  background: linear-gradient(180deg, #ff8d3a, #d95416);
+  box-shadow: 0 4px 0 #8f3008;
+}
+
+.mobile-pause-btn[hidden] {
+  display: none !important;
+}
+
 .dev-win-btn:active {
   transform: translateY(1px);
 }
@@ -450,9 +470,16 @@ body.mobile-ui .dev-win-btn {
   top: 50px;
 }
 
+body.mobile-ui .mobile-pause-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 body.mobile-ui .menu-overlay {
   padding: 16px 14px;
   gap: 12px;
+  overflow-y: auto;
 }
 
 body.mobile-ui .overlay-logo {
@@ -469,6 +496,50 @@ body.mobile-ui .hint {
 body.mobile-ui .reward-panel {
   width: min(92vw, 700px);
   padding: 12px;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] {
+  align-content: start;
+  justify-items: stretch;
+  gap: 8px;
+  padding: 12px 12px 14px;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .overlay-logo {
+  display: none;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] h1 {
+  font-size: clamp(24px, 5vw, 32px);
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] #start-btn {
+  justify-self: center;
+  width: min(100%, 320px);
+  padding: 11px 20px;
+  font-size: 18px;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .reward-panel {
+  width: 100%;
+  max-width: none;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .reward-summary,
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .wallet-status,
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .reward-label,
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .claim-status {
+  font-size: 9px;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .reward-note,
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .reward-input {
+  font-size: 8px;
+}
+
+body.mobile-ui .menu-overlay[data-overlay-mode="won"] .claim-btn {
+  font-size: 16px;
+  padding: 9px 14px;
 }
 
 body.mobile-ui .wallet-modal {

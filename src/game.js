@@ -21,6 +21,7 @@ import { createMobileRuntimeController } from "./modules/mobile-runtime.js";
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
 const gameShell = document.getElementById("game-shell");
+const mobilePauseButton = document.getElementById("mobile-pause-btn");
 const startButton = document.getElementById("start-btn");
 const menuOverlay = document.getElementById("menu-overlay");
 const topWalletButton = document.getElementById("top-wallet-btn");
@@ -198,6 +199,40 @@ function syncControlsHint() {
 }
 
 /**
+ * Updates mobile-only pause button visibility and label
+ */
+function syncMobilePauseButton() {
+  if (!mobilePauseButton) {
+    return;
+  }
+
+  const visible = STATE.runtime.isMobile && STATE.mode === "playing" && !STATE.runtime.rotateNoticeVisible;
+  mobilePauseButton.hidden = !visible;
+  mobilePauseButton.textContent = STATE.paused ? "Resume" : "Pause";
+}
+
+/**
+ * Converts current player world position into client-space reference point for tap controls
+ *
+ * @returns {{ x: number; y: number } | null} Player position in client coordinates
+ */
+function getPlayerClientPoint() {
+  if (!STATE.player) {
+    return null;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    return null;
+  }
+
+  return {
+    x: rect.left + (STATE.player.x / canvas.width) * rect.width,
+    y: rect.top + (STATE.player.y / canvas.height) * rect.height,
+  };
+}
+
+/**
  * Checks whether local debug tools are enabled
  */
 function isDebugToolsEnabled() {
@@ -347,8 +382,10 @@ const mobileRuntime = createMobileRuntimeController({
   baseHeight: BASE_HEIGHT,
   shouldAcceptSwipe: () => STATE.mode === "playing" && !STATE.paused && (!walletModal || walletModal.hidden),
   onDirectionInput: handleDirectionInput,
+  getTapReferencePoint: getPlayerClientPoint,
   onRuntimeStateChange: () => {
     syncControlsHint();
+    syncMobilePauseButton();
   },
 });
 
@@ -386,6 +423,7 @@ function triggerDebugVictory() {
     buttonLabel: "Play Again",
     score: STATE.score,
   });
+  syncMobilePauseButton();
 }
 
 // ------------------------------------------------------------
@@ -506,6 +544,7 @@ function startNewGame() {
   setClaimStatus("");
   walletUi.closeWalletModal();
   overlayUi.hideOverlay();
+  syncMobilePauseButton();
   ensureAudioContext();
   if (audioCtx?.state === "suspended") {
     audioCtx.resume().catch(() => {});
@@ -844,6 +883,7 @@ function eatPellets() {
       buttonLabel: "Play Again",
       score: STATE.score,
     });
+    syncMobilePauseButton();
     playTone(840, 0.1, "sawtooth", 0.06);
     playTone(1040, 0.15, "triangle", 0.05);
   }
@@ -896,6 +936,7 @@ function handleEnemyCollisions() {
           buttonLabel: "Try Again",
           score: STATE.score,
         });
+        syncMobilePauseButton();
       } else {
         STATE.roundResetTimer = 0.95;
       }
@@ -1071,6 +1112,7 @@ function handleDirectionInput(dir) {
 function togglePause() {
   if (STATE.mode !== "playing") return;
   STATE.paused = !STATE.paused;
+  syncMobilePauseButton();
   rewardsController.queueSessionEvent("pause_toggled", {
     paused: STATE.paused,
   });
@@ -1198,6 +1240,11 @@ function setupEvents() {
       triggerDebugVictory();
     });
   }
+  if (mobilePauseButton) {
+    mobilePauseButton.addEventListener("click", () => {
+      togglePause();
+    });
+  }
 
   document.addEventListener("fullscreenchange", () => {
     mobileRuntime.applyLayout();
@@ -1233,6 +1280,7 @@ function init() {
   walletUi.updateTopWalletButton();
   walletUi.updateWalletStatusForClaimPanel();
   setClaimControlsDisabled(false);
+  syncMobilePauseButton();
   if (STATE.rewards.apiBase) {
     setClaimStatus(`Rewards API: ${STATE.rewards.apiBase}`);
   } else {
@@ -1240,7 +1288,14 @@ function init() {
   }
   window.render_game_to_text = renderGameToText;
   window.advanceTime = advanceTime;
-  window.__fpom_game = { state: STATE, walletUi, rewardsController, mobileRuntime, gameVariant: GAME_VARIANT.id };
+  window.__fpom_game = {
+    state: STATE,
+    walletUi,
+    rewardsController,
+    mobileRuntime,
+    overlayUi,
+    gameVariant: GAME_VARIANT.id,
+  };
   render();
 
   if (animationFrame) {
