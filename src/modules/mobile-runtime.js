@@ -2,6 +2,26 @@ const MOBILE_VIEWPORT_MAX = 1024;
 const MOBILE_TOUCH_SWIPE_THRESHOLD = 24;
 
 /**
+ * Returns current usable viewport width, preferring visual viewport on iOS/mobile browsers
+ *
+ * @returns {number}
+ */
+function getViewportWidth() {
+  const visualWidth = window.visualViewport?.width;
+  return Math.max(0, Math.round(visualWidth || window.innerWidth || 0));
+}
+
+/**
+ * Returns current usable viewport height, preferring visual viewport on iOS/mobile browsers
+ *
+ * @returns {number}
+ */
+function getViewportHeight() {
+  const visualHeight = window.visualViewport?.height;
+  return Math.max(0, Math.round(visualHeight || window.innerHeight || 0));
+}
+
+/**
  * Detects whether current runtime should use mobile controls/layout
  *
  * @returns {boolean} True for coarse-pointer touch devices with mobile-sized viewport
@@ -10,7 +30,7 @@ function detectMobileRuntime() {
   const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
   const hasTouchPoints = Number(window.navigator?.maxTouchPoints || 0) > 0;
   const mobileUserAgent = /Android|iPhone|iPad|iPod|Mobile/i.test(window.navigator?.userAgent || "");
-  const maxViewportSide = Math.max(window.innerWidth, window.innerHeight);
+  const maxViewportSide = Math.max(getViewportWidth(), getViewportHeight());
   return (coarsePointer || hasTouchPoints || mobileUserAgent) && maxViewportSide <= MOBILE_VIEWPORT_MAX;
 }
 
@@ -20,7 +40,7 @@ function detectMobileRuntime() {
  * @returns {boolean} True when viewport width is greater than or equal to height
  */
 function isLandscapeViewport() {
-  return window.innerWidth >= window.innerHeight;
+  return getViewportWidth() >= getViewportHeight();
 }
 
 /**
@@ -35,8 +55,8 @@ function computeShellWidth(baseWidth, baseHeight, isMobile) {
   const aspect = baseWidth / baseHeight;
   const viewportPadding = isMobile ? 8 : 32;
   const borderAllowance = 12;
-  const availableWidth = Math.max(280, window.innerWidth - viewportPadding - borderAllowance);
-  const availableHeight = Math.max(220, window.innerHeight - viewportPadding - borderAllowance);
+  const availableWidth = Math.max(280, getViewportWidth() - viewportPadding - borderAllowance);
+  const availableHeight = Math.max(220, getViewportHeight() - viewportPadding - borderAllowance);
   return Math.max(280, Math.floor(Math.min(baseWidth, availableWidth, availableHeight * aspect)));
 }
 
@@ -112,6 +132,8 @@ export function createMobileRuntimeController(options) {
    * Updates runtime state flags and controls copy
    */
   function updateRuntimeState() {
+    const viewportWidth = getViewportWidth();
+    const viewportHeight = getViewportHeight();
     runtimeState.isMobile = detectMobileRuntime();
     runtimeState.isLandscape = isLandscapeViewport();
     runtimeState.rotateNoticeVisible = runtimeState.isMobile && !runtimeState.isLandscape;
@@ -124,6 +146,8 @@ export function createMobileRuntimeController(options) {
 
     body.classList.toggle("mobile-ui", runtimeState.isMobile);
     body.classList.toggle("mobile-portrait", runtimeState.rotateNoticeVisible);
+    body.style.setProperty("--viewport-width", `${viewportWidth}px`);
+    body.style.setProperty("--viewport-height", `${viewportHeight}px`);
     if (rotateOverlay) {
       rotateOverlay.hidden = !runtimeState.rotateNoticeVisible;
     }
@@ -258,8 +282,15 @@ export function createMobileRuntimeController(options) {
   function installEventListeners() {
     window.addEventListener("resize", applyLayout);
     window.addEventListener("orientationchange", () => {
-      window.setTimeout(applyLayout, 80);
+      applyLayout();
+      for (const delayMs of [80, 180, 320, 500]) {
+        window.setTimeout(applyLayout, delayMs);
+      }
     });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", applyLayout);
+      window.visualViewport.addEventListener("scroll", applyLayout);
+    }
     canvas.addEventListener("touchstart", onTouchStart, { passive: true });
     canvas.addEventListener("touchmove", onTouchMove, { passive: false });
     canvas.addEventListener("touchend", onTouchEnd, { passive: false });

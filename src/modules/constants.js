@@ -35,6 +35,7 @@ export const SESSION_RETRY_DELAY_MS = 2500;
  * @readonly
  */
 export const PROJECT_LINKS = Object.freeze({
+  GIT: "https://github.com/massivedev0/pac-fpom/",
   X: "https://x.com/PepeOnMassaFake",
   DUSA: "https://app.dusa.io/pools/AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib/AS12U4TZfNK7qoLyEERBBRDMu8nm5MKoRzPXDXans4v9wdATZedz9/100/V2",
   EAGLEFI: "https://www.eaglefi.io/token/AS12GDtiLRQELN8e6cYsCiAGLqdogk59Z9HdhHRsMSueDA8qYyhib",
