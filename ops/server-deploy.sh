@@ -3,7 +3,6 @@ set -euo pipefail
 
 APP_HOME="${APP_HOME:-$HOME/app}"
 SHARED_HOME="${SHARED_HOME:-$HOME/shared}"
-WEB_ROOT="${WEB_ROOT:-$HOME/www/fpom.app}"
 SERVICE_NAME="${SERVICE_NAME:-fpom-backend.service}"
 
 if [[ ! -d "$APP_HOME/.git" ]]; then
@@ -15,11 +14,6 @@ if [[ ! -f "$SHARED_HOME/backend.env" ]]; then
   echo "Missing shared env file: $SHARED_HOME/backend.env" >&2
   exit 1
 fi
-
-install -d "$WEB_ROOT" "$WEB_ROOT/assets"
-
-rsync -a --delete "$APP_HOME/landing/" "$WEB_ROOT/"
-rsync -a --delete "$APP_HOME/assets/" "$WEB_ROOT/assets/"
 
 cd "$APP_HOME/backend"
 ln -sfn "$SHARED_HOME/backend.env" .env

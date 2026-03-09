@@ -28,7 +28,7 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -p "${FPOM_SSH_PORT:-22}" -H "$FPOM_SSH_HOST" >> ~/.ssh/known_hosts
 
-      - name: Deploy backend and landing page
+      - name: Deploy backend
         env:
           FPOM_SSH_HOST: ${{ secrets.FPOM_SSH_HOST }}
           FPOM_SSH_PORT: ${{ secrets.FPOM_SSH_PORT }}
