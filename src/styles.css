@@ -255,6 +255,11 @@ body {
   gap: 8px;
 }
 
+.wallet-picker-actions .wallet-picker-back-btn,
+.wallet-picker-actions .wallet-option-btn {
+  text-align: center;
+}
+
 .wallet-picker-back-btn {
   width: 100%;
   border: 2px solid rgba(48, 71, 110, 0.24);
@@ -541,8 +546,9 @@ body.mobile-ui .menu-overlay {
     "logo subtitle"
     "button button"
     "hint hint";
-  padding: 16px 14px;
-  gap: 12px;
+  align-content: start;
+  padding: 64px 14px 92px;
+  gap: 10px;
   overflow-y: auto;
 }
 

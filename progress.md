@@ -10,3 +10,4 @@ Original prompt: Добавь ссылку на git https://massivedev0.github.i
 - Verified `npm run build` succeeds.
 - Ran the web-game Playwright client against `http://127.0.0.1:4181` and produced fresh smoke artifacts in `tests/playwright/artifacts/postfix-smoke/`.
 - Captured iPhone SE screenshots for portrait and portrait-to-landscape rotation in `tests/playwright/artifacts/mobile-check/`; landscape metrics show the shell and wallet modal remain inside the 667x375 viewport after rotation.
+- Follow-up tweaks: added a leading `WEB` footer button, centered the account-picker action buttons, and moved the mobile title-screen content slightly higher with extra bottom reserve for the footer links.
