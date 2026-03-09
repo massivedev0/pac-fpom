@@ -228,7 +228,7 @@ export function createWalletUiController(options) {
     for (const option of accountOptions) {
       const item = document.createElement("option");
       item.value = option.address;
-      item.textContent = option.address;
+      item.textContent = formatCompactAddress(option.address, 10, 6);
       select.append(item);
     }
 

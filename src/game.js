@@ -39,6 +39,8 @@ const claimButton = document.getElementById("claim-btn");
 const claimStatus = document.getElementById("claim-status");
 const devWinButton = document.getElementById("dev-win-btn");
 const mobileRotateOverlay = document.getElementById("mobile-rotate-overlay");
+const menuLinkWeb = document.getElementById("menu-link-web");
+const menuLinkGit = document.getElementById("menu-link-git");
 const menuLinkX = document.getElementById("menu-link-x");
 const menuLinkDusa = document.getElementById("menu-link-dusa");
 const menuLinkEagleFi = document.getElementById("menu-link-eaglefi");
@@ -207,6 +209,12 @@ function syncControlsHint() {
  * Populates title-screen project links from shared constants
  */
 function syncProjectLinks() {
+  if (menuLinkWeb) {
+    menuLinkWeb.href = PROJECT_LINKS.WEB;
+  }
+  if (menuLinkGit) {
+    menuLinkGit.href = PROJECT_LINKS.GIT;
+  }
   if (menuLinkX) {
     menuLinkX.href = PROJECT_LINKS.X;
   }

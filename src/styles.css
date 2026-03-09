@@ -27,7 +27,7 @@ body {
   display: grid;
   place-items: center;
   padding: 16px;
-  min-height: 100dvh;
+  min-height: var(--viewport-height, 100dvh);
   overflow: hidden;
   overscroll-behavior: none;
 }
@@ -130,7 +130,12 @@ body {
   display: grid;
   place-items: center;
   background: rgba(8, 8, 18, 0.55);
-  padding: 16px;
+  padding:
+    max(16px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  overflow: auto;
 }
 
 .mobile-rotate-overlay {
@@ -182,11 +187,21 @@ body {
   display: grid;
   gap: 10px;
   padding: 18px;
+  max-height: min(560px, calc(var(--viewport-height, 100dvh) - 32px));
   border-radius: 16px;
   border: 3px solid rgba(50, 100, 210, 0.34);
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
   text-align: left;
+  align-content: start;
+  overflow: auto;
+}
+
+.wallet-modal-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .wallet-modal-card h2 {
@@ -204,7 +219,7 @@ body {
 }
 
 .wallet-modal-close {
-  justify-self: end;
+  flex: 0 0 auto;
   border: 0;
   border-radius: 10px;
   padding: 4px 8px;
@@ -219,6 +234,7 @@ body {
 .wallet-options {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .wallet-account-select {
@@ -228,6 +244,7 @@ body {
   padding: 10px 12px;
   font-family: "Press Start 2P", monospace;
   font-size: 9px;
+  line-height: 1.5;
   color: #1e2e4b;
   background: #fff;
 }
@@ -236,6 +253,11 @@ body {
   display: grid;
   grid-template-columns: 132px 1fr;
   gap: 8px;
+}
+
+.wallet-picker-actions .wallet-picker-back-btn,
+.wallet-picker-actions .wallet-option-btn {
+  text-align: center;
 }
 
 .wallet-picker-back-btn {
@@ -257,10 +279,13 @@ body {
   padding: 10px 12px;
   font-family: "Bungee", sans-serif;
   font-size: 20px;
+  line-height: 1.2;
   color: #1e2e4b;
   text-align: left;
   background: #fff;
   cursor: pointer;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .wallet-option-btn:disabled {
@@ -488,7 +513,7 @@ body.mobile-ui {
 }
 
 body.mobile-ui .layout {
-  min-height: 100%;
+  min-height: var(--viewport-height, 100%);
 }
 
 body.mobile-ui .game-shell {
@@ -521,8 +546,9 @@ body.mobile-ui .menu-overlay {
     "logo subtitle"
     "button button"
     "hint hint";
-  padding: 16px 14px;
-  gap: 12px;
+  align-content: start;
+  padding: 64px 14px 92px;
+  gap: 10px;
   overflow-y: auto;
 }
 
@@ -625,11 +651,47 @@ body.mobile-ui .menu-overlay[data-overlay-mode="won"] .claim-btn {
 }
 
 body.mobile-ui .wallet-modal {
-  padding: 12px;
+  place-items: end center;
+  padding:
+    max(10px, env(safe-area-inset-top))
+    max(10px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom))
+    max(10px, env(safe-area-inset-left));
 }
 
 body.mobile-ui .wallet-modal-card {
-  width: min(560px, 92vw);
+  width: min(100%, 420px);
+  max-height: calc(var(--viewport-height, 100dvh) - 20px);
+  gap: 8px;
+  padding: 14px;
+}
+
+body.mobile-ui .wallet-modal-header {
+  gap: 8px;
+}
+
+body.mobile-ui .wallet-modal-card h2 {
+  font-size: clamp(22px, 6vw, 26px);
+}
+
+body.mobile-ui .wallet-modal-subtitle,
+body.mobile-ui .wallet-options-empty {
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+body.mobile-ui .wallet-option-btn,
+body.mobile-ui .wallet-picker-back-btn {
+  padding: 9px 10px;
+  font-size: 16px;
+}
+
+body.mobile-ui .wallet-account-select {
+  font-size: 8px;
+}
+
+body.mobile-ui .wallet-picker-actions {
+  grid-template-columns: 1fr;
 }
 
 body.mobile-portrait .game-shell {
