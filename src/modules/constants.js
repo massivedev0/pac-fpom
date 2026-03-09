@@ -23,6 +23,7 @@ export const FIXED_DT = 1 / 60;
  */
 export const REWARDS_API_TIMEOUT_MS = 30_000;
 export const DEFAULT_LOCAL_API = "http://127.0.0.1:8787";
+export const DEFAULT_PRODUCTION_API = "https://pac-backend.fpom.app";
 export const DEFAULT_DEBUG_WIN_SCORE = 106_050;
 export const DEFAULT_X_PROMO_TWEET = "https://x.com/massalabs";
 export const SESSION_EVENTS_BATCH_SIZE = 64;

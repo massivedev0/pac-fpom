@@ -1,0 +1,44 @@
+name: Deploy FPOM Server
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: fpom-server
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.ref_name == 'master'
+
+    steps:
+      - name: Configure SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.FPOM_SSH_KEY }}
+
+      - name: Add server to known_hosts
+        env:
+          FPOM_SSH_HOST: ${{ secrets.FPOM_SSH_HOST }}
+          FPOM_SSH_PORT: ${{ secrets.FPOM_SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${FPOM_SSH_PORT:-22}" -H "$FPOM_SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy backend and landing page
+        env:
+          FPOM_SSH_HOST: ${{ secrets.FPOM_SSH_HOST }}
+          FPOM_SSH_PORT: ${{ secrets.FPOM_SSH_PORT }}
+          FPOM_SSH_USER: ${{ secrets.FPOM_SSH_USER }}
+        run: |
+          ssh -p "${FPOM_SSH_PORT:-22}" "$FPOM_SSH_USER@$FPOM_SSH_HOST" <<'EOF'
+          set -euo pipefail
+          cd "$HOME/app"
+          git fetch origin master
+          git checkout master
+          git pull --ff-only origin master
+          bash "$HOME/app/ops/server-deploy.sh"
+          EOF

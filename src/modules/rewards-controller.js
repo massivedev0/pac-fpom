@@ -1,6 +1,7 @@
 import {
   CLAIM_VERIFICATION_MODE,
   DEFAULT_LOCAL_API,
+  DEFAULT_PRODUCTION_API,
   DEFAULT_X_PROMO_TWEET,
   REWARDS_API_TIMEOUT_MS,
   SESSION_EVENTS_BATCH_SIZE,
@@ -16,6 +17,15 @@ import {
 } from "./rewards-helpers.js";
 
 const CLAIM_STATUS_POLL_INTERVAL_MS = 5000;
+
+function isLocalDevelopmentHost(hostname) {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname.endsWith(".localhost")
+  );
+}
 
 /**
  * Creates rewards/session controller for telemetry, backend sync, and claim flow
@@ -81,11 +91,11 @@ export function createRewardsController(options) {
       return queryApi.replace(/\/+$/, "");
     }
 
-    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+    if (isLocalDevelopmentHost(window.location.hostname)) {
       return DEFAULT_LOCAL_API;
     }
 
-    return "";
+    return DEFAULT_PRODUCTION_API;
   }
 
   /**

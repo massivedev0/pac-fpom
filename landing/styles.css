@@ -1,0 +1,367 @@
+:root {
+  --bg-1: #fff3d9;
+  --bg-2: #ffcf88;
+  --bg-3: #ff8355;
+  --ink: #22160d;
+  --panel: rgba(255, 249, 237, 0.84);
+  --panel-strong: rgba(255, 245, 226, 0.96);
+  --line: rgba(73, 32, 11, 0.14);
+  --red: #ef4732;
+  --red-deep: #a21d0f;
+  --green: #1e8f4a;
+  --shadow: 0 18px 60px rgba(95, 31, 2, 0.18);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 28%),
+    radial-gradient(circle at 80% 20%, rgba(255, 84, 45, 0.22), rgba(255, 84, 45, 0) 30%),
+    radial-gradient(circle at 25% 100%, rgba(241, 117, 46, 0.35), rgba(241, 117, 46, 0) 25%),
+    linear-gradient(160deg, var(--bg-1), var(--bg-2) 48%, var(--bg-3));
+}
+
+body {
+  padding: 24px;
+}
+
+.page-shell {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+}
+
+.hero,
+.panel,
+.footer-note {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 24px;
+  padding: 34px;
+}
+
+.hero::after,
+.panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+  background-size: 24px 24px;
+  pointer-events: none;
+  opacity: 0.34;
+}
+
+.eyebrow,
+.panel-kicker,
+.ticker-label {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--red-deep);
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-family: "Bungee", sans-serif;
+  font-weight: 400;
+  line-height: 1.08;
+}
+
+h1 {
+  max-width: 9ch;
+  font-size: clamp(3rem, 7vw, 5.6rem);
+}
+
+h2 {
+  font-size: clamp(1.5rem, 3vw, 2.4rem);
+}
+
+.lead,
+.footer-note p,
+.ticker-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 62ch;
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.hero-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.cta,
+.link-card,
+.simple-link {
+  text-decoration: none;
+}
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-weight: 700;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.cta:hover,
+.link-card:hover,
+.simple-link:hover {
+  transform: translateY(-2px);
+}
+
+.cta-primary {
+  color: #fff7ef;
+  background: linear-gradient(180deg, #ff5f3d, #d93018);
+  box-shadow: 0 10px 24px rgba(192, 48, 22, 0.24);
+}
+
+.cta-secondary {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 10px 20px rgba(91, 31, 9, 0.1);
+}
+
+.hero-visual {
+  position: relative;
+  min-height: 360px;
+}
+
+.coin-logo {
+  position: absolute;
+  inset: auto auto 24px 50%;
+  width: min(360px, 72%);
+  transform: translateX(-50%) rotate(-10deg);
+  filter: drop-shadow(0 18px 30px rgba(113, 44, 12, 0.2));
+}
+
+.meme-sticker {
+  position: absolute;
+  width: 128px;
+  border-radius: 24px;
+  border: 3px solid rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 12px 32px rgba(84, 30, 8, 0.16);
+  animation: floaty 4.8s ease-in-out infinite;
+}
+
+.meme-sticker-pepe {
+  top: 12px;
+  right: 18px;
+  transform: rotate(9deg);
+}
+
+.meme-sticker-doge {
+  left: 10px;
+  bottom: 98px;
+  transform: rotate(-12deg);
+  animation-delay: 0.8s;
+}
+
+.meme-sticker-shiba {
+  right: 104px;
+  bottom: 4px;
+  transform: rotate(12deg);
+  animation-delay: 1.5s;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 22px;
+  margin-top: 22px;
+}
+
+.panel {
+  padding: 26px;
+}
+
+.panel-wide {
+  grid-column: span 12;
+}
+
+.content-grid > .panel:not(.panel-wide) {
+  grid-column: span 6;
+}
+
+.panel-head {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 20px;
+}
+
+.link-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.link-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(87, 34, 13, 0.1);
+  background: var(--panel-strong);
+  color: inherit;
+  box-shadow: 0 12px 28px rgba(76, 26, 8, 0.08);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease;
+}
+
+.link-card.hot {
+  background: linear-gradient(180deg, rgba(255, 109, 72, 0.18), rgba(255, 252, 245, 0.95));
+  border-color: rgba(179, 42, 13, 0.18);
+}
+
+.link-label {
+  font-family: "Bungee", sans-serif;
+  font-size: 1.1rem;
+  line-height: 1.2;
+}
+
+.link-note {
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: rgba(34, 22, 13, 0.72);
+}
+
+.stack {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 12px;
+}
+
+.simple-link {
+  display: block;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(87, 34, 13, 0.1);
+  background: rgba(255, 255, 255, 0.62);
+  color: inherit;
+  font-weight: 700;
+  box-shadow: 0 10px 20px rgba(76, 26, 8, 0.06);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.simple-link:hover {
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.ticker-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.ticker-value {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(37, 24, 15, 0.92);
+  color: #ffe7c1;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.footer-note {
+  margin-top: 22px;
+  padding: 20px 24px;
+}
+
+@keyframes floaty {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+
+  50% {
+    translate: 0 -10px;
+  }
+}
+
+@media (max-width: 900px) {
+  body {
+    padding: 16px;
+  }
+
+  .hero {
+    grid-template-columns: 1fr;
+    padding: 24px;
+  }
+
+  .hero-visual {
+    min-height: 300px;
+  }
+
+  .content-grid > .panel:not(.panel-wide),
+  .panel-wide {
+    grid-column: span 12;
+  }
+
+  .link-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  h1 {
+    max-width: none;
+  }
+
+  .hero-actions {
+    flex-direction: column;
+  }
+
+  .cta {
+    width: 100%;
+  }
+
+  .meme-sticker {
+    width: 96px;
+  }
+}
