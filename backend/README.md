@@ -87,11 +87,33 @@ Current coverage includes:
 cd backend
 npm run logs
 npm run logs -- --limit 100
+npm run logs -- --started-games
 npm run logs -- --event CLAIM_PREPARED
 npm run logs -- --address AU12...
 npm run logs -- --claim cmm8...
 npm run logs -- --json
 ```
+
+`--started-games` filters to immediate `SESSION_STARTED` entries, so you can inspect only game launches.
+
+## Lifecycle stats
+
+```bash
+cd backend
+npm run stats
+npm run stats -- --period day
+npm run stats -- --period week
+npm run stats -- --period month
+npm run stats -- --limit 16
+npm run stats -- --json
+```
+
+Metrics included:
+
+- `gamesStarted`
+- `coinRequests`
+- `payoutsSent`
+- `manualReview`
 
 ## Admin links from CLI
 

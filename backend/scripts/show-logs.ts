@@ -6,6 +6,7 @@ type CliOptions = {
   event?: string;
   address?: string;
   claimId?: string;
+  startedGamesOnly: boolean;
   json: boolean;
 };
 
@@ -16,6 +17,8 @@ type RowData = {
   claim: string;
   address: string;
   session: string;
+  wallet: string;
+  device: string;
   payload: string;
 };
 
@@ -40,6 +43,7 @@ const COLOR = {
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     limit: 50,
+    startedGamesOnly: false,
     json: false,
   };
 
@@ -59,6 +63,12 @@ function parseArgs(argv: string[]): CliOptions {
     if (arg === "--event" && next) {
       options.event = next;
       i += 1;
+      continue;
+    }
+
+    if (arg === "--started-games") {
+      options.startedGamesOnly = true;
+      options.event = "SESSION_STARTED";
       continue;
     }
 
@@ -104,17 +114,92 @@ function short(value: string | null | undefined): string {
  * @param {string | null} payload Raw payload column
  * @returns {string} Printable payload string
  */
+function parsePayload(payload: string | null): Record<string, unknown> | null {
+  if (!payload) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(payload) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Normalizes payload column into compact JSON string
+ *
+ * @param {string | null} payload Raw payload column
+ * @returns {string} Printable payload string
+ */
 function formatPayload(payload: string | null): string {
   if (!payload) {
     return "-";
   }
 
-  try {
-    const parsed = JSON.parse(payload) as Record<string, unknown>;
+  const parsed = parsePayload(payload);
+  if (parsed) {
     return JSON.stringify(parsed);
-  } catch {
-    return payload;
   }
+
+  return payload;
+}
+
+/**
+ * Extracts client wallet label from audit payload when present
+ *
+ * @param {string | null} payload Raw payload column
+ * @returns {string} Printable wallet label
+ */
+function formatClientWallet(payload: string | null): string {
+  const parsed = parsePayload(payload);
+  const clientWallet = typeof parsed?.clientWallet === "string" ? parsed.clientWallet.trim() : "";
+  return clientWallet || "-";
+}
+
+/**
+ * Extracts compact client device description from audit payload when present
+ *
+ * @param {string | null} payload Raw payload column
+ * @returns {string} Printable device summary
+ */
+function formatClientDevice(payload: string | null): string {
+  const parsed = parsePayload(payload);
+  const clientDevice =
+    parsed && parsed.clientDevice && typeof parsed.clientDevice === "object" && !Array.isArray(parsed.clientDevice)
+      ? (parsed.clientDevice as Record<string, unknown>)
+      : null;
+
+  if (!clientDevice) {
+    return "-";
+  }
+
+  const parts = [
+    typeof clientDevice.platform === "string" ? clientDevice.platform.trim() : "",
+    typeof clientDevice.timezone === "string" ? clientDevice.timezone.trim() : "",
+  ].filter(Boolean);
+  const screen =
+    clientDevice.screen &&
+    typeof clientDevice.screen === "object" &&
+    !Array.isArray(clientDevice.screen) &&
+    Number.isFinite(Number((clientDevice.screen as Record<string, unknown>).width)) &&
+    Number.isFinite(Number((clientDevice.screen as Record<string, unknown>).height))
+      ? `${Number((clientDevice.screen as Record<string, unknown>).width)}x${Number((clientDevice.screen as Record<string, unknown>).height)}`
+      : "";
+  if (screen) {
+    parts.push(screen);
+  }
+
+  const summary = parts.join(" | ");
+  if (summary) {
+    return summary;
+  }
+
+  return JSON.stringify(clientDevice);
 }
 
 /**
@@ -178,6 +263,8 @@ function rowsFromLogs(
     claim: short(row.claimId),
     address: short(row.address),
     session: short(row.sessionId),
+    wallet: formatClientWallet(row.payload),
+    device: formatClientDevice(row.payload),
     payload: formatPayload(row.payload),
   }));
 }
@@ -197,6 +284,8 @@ function renderTable(rows: RowData[], colorEnabled: boolean): string {
     claim: "claim",
     address: "address",
     session: "session",
+    wallet: "wallet",
+    device: "device",
     payload: "payload",
   };
 
@@ -207,6 +296,8 @@ function renderTable(rows: RowData[], colorEnabled: boolean): string {
     claim: 18,
     address: 18,
     session: 18,
+    wallet: 18,
+    device: 34,
     payload: 78,
   };
 
@@ -217,6 +308,8 @@ function renderTable(rows: RowData[], colorEnabled: boolean): string {
     claim: Math.min(maxWidths.claim, Math.max(headers.claim.length, ...rows.map((row) => row.claim.length))),
     address: Math.min(maxWidths.address, Math.max(headers.address.length, ...rows.map((row) => row.address.length))),
     session: Math.min(maxWidths.session, Math.max(headers.session.length, ...rows.map((row) => row.session.length))),
+    wallet: Math.min(maxWidths.wallet, Math.max(headers.wallet.length, ...rows.map((row) => row.wallet.length))),
+    device: Math.min(maxWidths.device, Math.max(headers.device.length, ...rows.map((row) => row.device.length))),
     payload: Math.min(maxWidths.payload, Math.max(headers.payload.length, ...rows.map((row) => row.payload.length))),
   };
 
@@ -229,6 +322,8 @@ function renderTable(rows: RowData[], colorEnabled: boolean): string {
     renderCell(headers.claim, "claim"),
     renderCell(headers.address, "address"),
     renderCell(headers.session, "session"),
+    renderCell(headers.wallet, "wallet"),
+    renderCell(headers.device, "device"),
     renderCell(headers.payload, "payload"),
   ].join("  ");
 
@@ -239,6 +334,8 @@ function renderTable(rows: RowData[], colorEnabled: boolean): string {
     "-".repeat(widths.claim),
     "-".repeat(widths.address),
     "-".repeat(widths.session),
+    "-".repeat(widths.wallet),
+    "-".repeat(widths.device),
     "-".repeat(widths.payload),
   ].join("  ");
 
@@ -260,6 +357,8 @@ function renderTable(rows: RowData[], colorEnabled: boolean): string {
         renderCell(row.claim, "claim"),
         renderCell(row.address, "address"),
         renderCell(row.session, "session"),
+        renderCell(row.wallet, "wallet"),
+        renderCell(row.device, "device"),
         payloadCell,
       ].join("  "),
     );
@@ -301,7 +400,8 @@ async function main() {
 
     const colorEnabled = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
     const rows = rowsFromLogs(logs);
-    console.log(`Found ${logs.length} audit log entries`);
+    const title = options.startedGamesOnly ? "started-game audit log entries" : "audit log entries";
+    console.log(`Found ${logs.length} ${title}`);
     console.log(renderTable(rows, colorEnabled));
   } finally {
     await prisma.$disconnect();

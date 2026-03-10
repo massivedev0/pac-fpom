@@ -26,3 +26,13 @@ Original prompt: Добавь ссылку на git https://massivedev0.github.i
 - Final promo video deliverable: trimmed `output/playwright/fpom-promo/promo-clip-10s.mp4` (10 seconds, 960x640), showing FPOM hunting meme enemies during active power mode.
 - User reported the first Playwright-recorded video looked jerky; replaced the live capture path with deterministic frame export using `advanceTime()` and 300 exact frames at 30 FPS.
 - New smooth deliverable: `output/playwright/fpom-promo/promo-clip-10s-smooth.mp4` (10 seconds, 960x640, 30 FPS).
+- New request: verify whether game starts are logged immediately, then add immediate server-side start tracking plus CLI support for started-game logs and lifecycle stats by day/week/month.
+- Frontend session tracking change in progress: `startNewGame()` now starts the rewards session immediately instead of waiting for claim-time flush, while guarding async session/event uploads against stale run resets with a `sessionEpoch`.
+- Backend CLI change in progress: added `npm run logs -- --started-games`, created `npm run stats` for `gamesStarted / coinRequests / payoutsSent / manualReview`, and added aggregation tests for daily/weekly/monthly buckets.
+- Verification complete: `npm run build`, `cd backend && npm test`, and `cd backend && npm run build` all pass after the start-tracking/statistics changes.
+- Live verification complete against isolated SQLite `file:./verify-session-start-2.db`: two Playwright smoke launches created two immediate `SESSION_STARTED` audit entries, and `npm run stats -- --period day --limit 3` reported `gamesStarted = 2` for `2026-03-10`.
+- Residual note: Playwright smoke still records one generic browser console error `Failed to load resource: net::ERR_CONNECTION_REFUSED`; the new start-tracking flow itself succeeds (`/session/start` and `/session/event` both returned 200) and the visual smoke screenshot/state remained valid.
+- Follow-up request completed: immediate session-start payload now includes `clientWallet` and `clientDevice`, matching the client metadata already persisted for claims and used in Slack notifications.
+- `npm run logs` now renders `wallet` and `device` columns parsed from audit payloads, so started-game entries show client metadata directly without requiring `--json`.
+- Failure-path verification complete with backend intentionally unavailable: Playwright smoke still reached `mode=playing` while the browser logged `ERR_CONNECTION_REFUSED`, confirming game flow remains non-blocking when the start-event request fails.
+- Follow-up CLI polish: `npm run stats` now uses the same ANSI color treatment as `npm run logs` for section headers, table headers, and metric columns, while preserving plain-text output when colors are disabled.
