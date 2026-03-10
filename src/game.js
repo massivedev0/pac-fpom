@@ -158,6 +158,7 @@ const images = {
 
 const keysPressed = new Set();
 let audioCtx = null;
+let audioContextPrimed = false;
 let animationFrame = null;
 let lastTs = 0;
 let accumulator = 0;
@@ -576,10 +577,6 @@ function startNewGame() {
   walletUi.closeWalletModal();
   overlayUi.hideOverlay();
   syncMobilePauseButton();
-  ensureAudioContext();
-  if (audioCtx?.state === "suspended") {
-    audioCtx.resume().catch(() => {});
-  }
   playTone(460, 0.09, "triangle", 0.04);
 }
 
@@ -606,6 +603,55 @@ function ensureAudioContext() {
     return;
   }
   audioCtx = new AudioContext();
+}
+
+/**
+ * Plays an inaudible warmup tick so iOS Safari keeps the audio graph unlocked
+ */
+function primeAudioContext() {
+  if (!audioCtx || audioContextPrimed || audioCtx.state !== "running") {
+    return;
+  }
+  const buffer = audioCtx.createBuffer(1, 1, 22050);
+  const source = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  source.buffer = buffer;
+  gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+  source.connect(gain);
+  gain.connect(audioCtx.destination);
+  source.start();
+  audioContextPrimed = true;
+}
+
+/**
+ * Starts or resumes WebAudio synchronously from a trusted input gesture
+ */
+function unlockAudioContextFromGesture() {
+  ensureAudioContext();
+  if (!audioCtx) {
+    return;
+  }
+
+  if (audioCtx.state === "running") {
+    primeAudioContext();
+    return;
+  }
+
+  try {
+    const resumeResult = audioCtx.resume();
+    if (resumeResult && typeof resumeResult.then === "function") {
+      resumeResult
+        .then(() => {
+          primeAudioContext();
+        })
+        .catch(() => {});
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  primeAudioContext();
 }
 
 /**
@@ -1206,6 +1252,7 @@ function isClaimPanelTarget(target) {
 function onKeyDown(event) {
   const { code } = event;
   keysPressed.add(code);
+  unlockAudioContextFromGesture();
   const isTypingTarget = isTextInputElement(event.target);
   const isWalletModalOpen = Boolean(walletModal && !walletModal.hidden);
   const isClaimTarget = isClaimPanelTarget(event.target);
@@ -1261,9 +1308,15 @@ function onKeyUp(event) {
  */
 function setupEvents() {
   mobileRuntime.installEventListeners();
+  const handleAudioGesture = () => {
+    unlockAudioContextFromGesture();
+  };
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
-  startButton.addEventListener("click", () => startNewGame());
+  startButton.addEventListener("click", () => {
+    handleAudioGesture();
+    startNewGame();
+  });
   if (claimButton) {
     claimButton.addEventListener("click", () => {
       rewardsController.submitRewardClaim(readClaimForm()).catch(() => {});
@@ -1271,6 +1324,7 @@ function setupEvents() {
   }
   if (topWalletButton) {
     topWalletButton.addEventListener("click", () => {
+      handleAudioGesture();
       walletUi.openWalletModal().catch(() => {
         setClaimStatus("Failed to open wallet selector");
       });
@@ -1295,8 +1349,14 @@ function setupEvents() {
   }
   if (mobilePauseButton) {
     mobilePauseButton.addEventListener("click", () => {
+      handleAudioGesture();
       togglePause();
     });
+  }
+  if (window.PointerEvent) {
+    canvas.addEventListener("pointerdown", handleAudioGesture, { passive: true });
+  } else {
+    canvas.addEventListener("touchstart", handleAudioGesture, { passive: true });
   }
 
   document.addEventListener("fullscreenchange", () => {
@@ -1305,10 +1365,6 @@ function setupEvents() {
 
   menuOverlay.addEventListener("click", () => {
     mobileRuntime.requestLandscapeLock().catch(() => {});
-    ensureAudioContext();
-    if (audioCtx?.state === "suspended") {
-      audioCtx.resume().catch(() => {});
-    }
   });
 }
 

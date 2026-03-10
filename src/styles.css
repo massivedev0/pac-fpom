@@ -81,13 +81,15 @@ body {
   z-index: 4;
   border: 0;
   border-radius: 999px;
-  padding: 8px 14px;
+  padding: 5px 10px;
   font-family: "Bungee", sans-serif;
-  font-size: 15px;
+  font-size: 13px;
+  line-height: 1;
   color: #fff;
   cursor: pointer;
   background: linear-gradient(180deg, #ff8d3a, #d95416);
-  box-shadow: 0 4px 0 #8f3008;
+  box-shadow: 0 3px 0 #8f3008;
+  opacity: 0.94;
 }
 
 .mobile-pause-btn[hidden] {
@@ -537,6 +539,11 @@ body.mobile-ui .mobile-pause-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  top: 48%;
+  right: 40px;
+  left: auto;
+  min-width: 58px;
+  transform: translateY(-50%);
 }
 
 body.mobile-ui .menu-overlay {
