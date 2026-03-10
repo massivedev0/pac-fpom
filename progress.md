@@ -17,3 +17,5 @@ Original prompt: Добавь ссылку на git https://massivedev0.github.i
 - Re-ran `npm run build`, Playwright smoke, and captured a fresh mobile gameplay screenshot in `tests/playwright/artifacts/mobile-pause-audio-2/`; sound behavior could not be acoustically verified from automation.
 - Follow-up audio fix: removed the async/await-based unlock path that could lose the trusted gesture on mobile, and switched to direct synchronous `resume()` calls from gesture handlers/start button/keydown.
 - Verified again with `npm run build` and a fresh Playwright smoke run in `tests/playwright/artifacts/postfix-smoke-audio-3/`.
+- Final audio cleanup: removed duplicate unlock calls from button/overlay click paths and kept a single capture-phase gesture unlock path (`pointerdown` or `touchstart` fallback) plus keyboard unlock.
+- Verified in Playwright mobile emulation that tapping `Start Hunt` no longer emits console messages about `AudioContext was not allowed to start`.

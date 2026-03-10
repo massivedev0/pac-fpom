@@ -1311,12 +1311,10 @@ function setupEvents() {
   const handleAudioGesture = () => {
     unlockAudioContextFromGesture();
   };
-  document.addEventListener("touchstart", handleAudioGesture, { passive: true, capture: true });
-  document.addEventListener("pointerdown", handleAudioGesture, { passive: true, capture: true });
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
   startButton.addEventListener("click", () => {
-    unlockAudioContextFromGesture();
+    handleAudioGesture();
     startNewGame();
   });
   if (claimButton) {
@@ -1355,8 +1353,11 @@ function setupEvents() {
       togglePause();
     });
   }
-  canvas.addEventListener("touchstart", handleAudioGesture, { passive: true });
-  canvas.addEventListener("pointerdown", handleAudioGesture, { passive: true });
+  if (window.PointerEvent) {
+    canvas.addEventListener("pointerdown", handleAudioGesture, { passive: true });
+  } else {
+    canvas.addEventListener("touchstart", handleAudioGesture, { passive: true });
+  }
 
   document.addEventListener("fullscreenchange", () => {
     mobileRuntime.applyLayout();
@@ -1364,7 +1365,6 @@ function setupEvents() {
 
   menuOverlay.addEventListener("click", () => {
     mobileRuntime.requestLandscapeLock().catch(() => {});
-    handleAudioGesture();
   });
 }
 
