@@ -19,3 +19,10 @@ Original prompt: Добавь ссылку на git https://massivedev0.github.i
 - Verified again with `npm run build` and a fresh Playwright smoke run in `tests/playwright/artifacts/postfix-smoke-audio-3/`.
 - Final audio cleanup: removed duplicate unlock calls from button/overlay click paths and kept a single capture-phase gesture unlock path (`pointerdown` or `touchstart` fallback) plus keyboard unlock.
 - Verified in Playwright mobile emulation that tapping `Start Hunt` no longer emits console messages about `AudioContext was not allowed to start`.
+- New request: prepare an English promo tweet for Meme Hunt Pac-FPOM and generate promo media assets (screenshots + short gameplay video).
+- Read FPOM public links from `README.md` and confirmed the main DeWeb URL to promote is `https://pac-fpom.deweb.half-red.net`.
+- Added `tests/playwright/capture-promo-media.js` to stage a deterministic arcade chase scene for promo capture without changing game runtime logic.
+- Recorded promo stills in `output/playwright/fpom-promo/stills/` and exported video files in `output/playwright/fpom-promo/`.
+- Final promo video deliverable: trimmed `output/playwright/fpom-promo/promo-clip-10s.mp4` (10 seconds, 960x640), showing FPOM hunting meme enemies during active power mode.
+- User reported the first Playwright-recorded video looked jerky; replaced the live capture path with deterministic frame export using `advanceTime()` and 300 exact frames at 30 FPS.
+- New smooth deliverable: `output/playwright/fpom-promo/promo-clip-10s-smooth.mp4` (10 seconds, 960x640, 30 FPS).
