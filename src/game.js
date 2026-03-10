@@ -130,6 +130,7 @@ const STATE = {
     promoOverrideLocked: false,
     promoConfigFetchTried: false,
     sessionId: null,
+    sessionEpoch: 0,
     sessionRetryAtMs: 0,
     nextEventSeq: 0,
     eventBuffer: [],
@@ -569,7 +570,7 @@ function startNewGame() {
   STATE.maze = MAZE_TEMPLATE.map((row) => row.split(""));
   initMaze();
   resetEntities();
-  rewardsController.queueSessionEvent("run_started", {
+  rewardsController.startRunSession({
     lives: STATE.lives,
     pelletsLeft: STATE.pelletsLeft,
   });

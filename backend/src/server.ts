@@ -47,8 +47,12 @@ const PAYOUT_STATUSES = {
   FAILED: "FAILED",
 } as const;
 
+const clientDeviceSchema = z.record(z.unknown());
+
 const sessionStartSchema = z.object({
   fingerprint: z.string().trim().min(8).max(500).optional(),
+  clientWallet: z.string().trim().min(2).max(120).optional(),
+  clientDevice: clientDeviceSchema.optional(),
 });
 
 const sessionEventSchema = z.object({
@@ -65,8 +69,6 @@ const runSummarySchema = z.object({
   enemiesEaten: z.number().int().nonnegative(),
   finalScoreClient: z.number().int().nonnegative(),
 });
-
-const clientDeviceSchema = z.record(z.unknown());
 
 const claimPrepareSchema = z.object({
   sessionId: z.string().trim().min(8),
@@ -989,6 +991,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       sessionId: session.id,
       payload: {
         hasFingerprint: Boolean(parsed.data.fingerprint),
+        clientWallet: parsed.data.clientWallet?.trim() || null,
+        clientDevice: parsed.data.clientDevice ?? null,
       },
     });
 
@@ -1207,6 +1211,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         amount: scoreServer,
         xProfile: normalizedXProfile,
         clientWallet: parsed.data.clientWallet?.trim() || null,
+        clientDevice: parsed.data.clientDevice ?? null,
         scoringSource,
         sessionEventsCount: sessionEvents.length,
       },

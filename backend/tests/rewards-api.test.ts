@@ -147,6 +147,27 @@ async function startSession(app: ReturnType<typeof createApp>) {
 }
 
 /**
+ * Starts a telemetry session with custom payload for tests
+ *
+ * @param {ReturnType<typeof createApp>} app Fastify app under test
+ * @param {Record<string, unknown>} payload Custom session-start body
+ * @returns {Promise<{ sessionId: string; nonce: string }>} Created session payload
+ */
+async function startSessionWithPayload(
+  app: ReturnType<typeof createApp>,
+  payload: Record<string, unknown>,
+) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/session/start",
+    payload,
+  });
+
+  assert.equal(response.statusCode, 200);
+  return response.json() as { sessionId: string; nonce: string };
+}
+
+/**
  * Calls claim prepare endpoint with arbitrary payload
  *
  * @param {ReturnType<typeof createApp>} app Fastify app under test
@@ -410,6 +431,38 @@ test("claim prepare should persist client wallet and device metadata", async () 
     assert.ok(claim);
     assert.equal(claim.clientWallet, "Bearby");
     assert.deepEqual(JSON.parse(claim.clientDevice ?? "{}"), TEST_CLIENT_DEVICE);
+  } finally {
+    await context.cleanup();
+  }
+});
+
+test("session start should write client wallet and device metadata into audit logs", async () => {
+  const context = await createTestContext();
+
+  try {
+    const session = await startSessionWithPayload(context.app, {
+      fingerprint: "test-device-12345",
+      clientWallet: "Bearby",
+      clientDevice: TEST_CLIENT_DEVICE,
+    });
+
+    const auditLog = await context.prisma.auditLog.findFirst({
+      where: {
+        event: "SESSION_STARTED",
+        sessionId: session.sessionId,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    assert.ok(auditLog);
+    const payload = JSON.parse(auditLog.payload ?? "{}") as {
+      hasFingerprint?: boolean;
+      clientWallet?: string | null;
+      clientDevice?: Record<string, unknown> | null;
+    };
+    assert.equal(payload.hasFingerprint, true);
+    assert.equal(payload.clientWallet, "Bearby");
+    assert.deepEqual(payload.clientDevice, TEST_CLIENT_DEVICE);
   } finally {
     await context.cleanup();
   }

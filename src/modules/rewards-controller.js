@@ -44,6 +44,7 @@ function isLocalDevelopmentHost(hostname) {
  *   applyRuntimeConfig: () => void;
  *   maybeSyncPromoTweetFromBackend: () => void;
  *   resetRunState: () => void;
+ *   startRunSession: (payload?: Record<string, unknown>) => void;
  *   queueSessionEvent: (type: string, payload?: Record<string, unknown>) => void;
  *   getRunElapsedMs: () => number;
  *   getRunSummary: () => {
@@ -75,6 +76,54 @@ export function createRewardsController(options) {
 
   let claimStatusPollTimerId = 0;
   let claimStatusPollInFlight = false;
+
+  /**
+   * Reads client fingerprint safely so telemetry failures never block gameplay
+   *
+   * @returns {string | undefined} Fingerprint payload when available
+   */
+  function safeGetFingerprint() {
+    try {
+      const value = getFingerprint();
+      return typeof value === "string" && value.trim() ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Reads device snapshot safely so telemetry failures never block gameplay
+   *
+   * @returns {Record<string, unknown> | undefined} Structured device payload when available
+   */
+  function safeGetClientDeviceInfo() {
+    try {
+      const value = getClientDeviceInfo();
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+      }
+      return value;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Builds the client metadata sent with immediate session start and later claim flow
+   *
+   * @returns {{ fingerprint?: string; clientWallet?: string; clientDevice?: Record<string, unknown> }} Client metadata
+   */
+  function getClientContextPayload() {
+    const fingerprint = safeGetFingerprint();
+    const clientWallet = String(rewardsState.walletProviderName || "").trim() || undefined;
+    const clientDevice = safeGetClientDeviceInfo();
+
+    return {
+      fingerprint,
+      clientWallet,
+      clientDevice,
+    };
+  }
 
   /**
    * Resolves rewards API base URL from runtime config
@@ -156,6 +205,7 @@ export function createRewardsController(options) {
     const promoTweetOverride = getPromoTweetOverrideUrl();
     rewardsState.promoOverrideLocked = Boolean(promoTweetOverride);
     rewardsState.promoConfigFetchTried = false;
+    rewardsState.sessionEpoch = 0;
     applyPromoTweetUrl(promoTweetOverride || DEFAULT_X_PROMO_TWEET);
   }
 
@@ -292,13 +342,11 @@ export function createRewardsController(options) {
       return;
     }
 
+    const sessionEpoch = rewardsState.sessionEpoch;
     rewardsState.eventFlushInFlight = true;
     try {
       const sessionId = await ensureRewardsSession(force);
-      if (!sessionId) {
-        if (force) {
-          throw new Error("session_unavailable");
-        }
+      if (!sessionId || rewardsState.sessionEpoch !== sessionEpoch) {
         return;
       }
 
@@ -309,8 +357,15 @@ export function createRewardsController(options) {
           startSeq: rewardsState.nextEventSeq,
           events: batch,
         });
+        if (rewardsState.sessionEpoch !== sessionEpoch) {
+          return;
+        }
         rewardsState.eventBuffer.splice(0, batch.length);
         rewardsState.nextEventSeq += batch.length;
+      }
+    } catch (error) {
+      if (force || rewardsState.sessionEpoch === sessionEpoch) {
+        throw error;
       }
     } finally {
       rewardsState.eventFlushInFlight = false;
@@ -332,17 +387,23 @@ export function createRewardsController(options) {
     }
 
     const now = performance.now();
+    const sessionEpoch = rewardsState.sessionEpoch;
     if (!force && rewardsState.sessionRetryAtMs > now) {
       return null;
     }
 
     try {
-      const session = await apiPost("/session/start", { fingerprint: getFingerprint() });
+      const session = await apiPost("/session/start", getClientContextPayload());
+      if (rewardsState.sessionEpoch !== sessionEpoch) {
+        return null;
+      }
       rewardsState.sessionId = session.sessionId;
       rewardsState.sessionRetryAtMs = 0;
       return rewardsState.sessionId;
     } catch (error) {
-      rewardsState.sessionRetryAtMs = now + SESSION_RETRY_DELAY_MS;
+      if (rewardsState.sessionEpoch === sessionEpoch) {
+        rewardsState.sessionRetryAtMs = now + SESSION_RETRY_DELAY_MS;
+      }
       throw error;
     }
   }
@@ -472,6 +533,7 @@ export function createRewardsController(options) {
    */
   function resetRunState() {
     stopClaimStatusPolling();
+    rewardsState.sessionEpoch = Number(rewardsState.sessionEpoch || 0) + 1;
     rewardsState.sessionId = null;
     rewardsState.sessionRetryAtMs = 0;
     rewardsState.nextEventSeq = 0;
@@ -481,6 +543,16 @@ export function createRewardsController(options) {
     rewardsState.claimInFlight = false;
     rewardsState.lastClaimTxHash = "";
     setClaimSubmissionLocked(false);
+  }
+
+  /**
+   * Starts a fresh telemetry session immediately when gameplay begins
+   *
+   * @param {Record<string, unknown>} [payload={}] Initial run-start payload
+   */
+  function startRunSession(payload = {}) {
+    queueSessionEvent("run_started", payload);
+    flushSessionEvents().catch(() => {});
   }
 
   /**
@@ -540,9 +612,7 @@ export function createRewardsController(options) {
         address: claimAddress,
         xProfile: normalizedXProfile,
         verificationMode: CLAIM_VERIFICATION_MODE,
-        fingerprint: getFingerprint(),
-        clientWallet: String(rewardsState.walletProviderName || "").trim(),
-        clientDevice: getClientDeviceInfo(),
+        ...getClientContextPayload(),
         run: getRunSummary(),
       });
 
@@ -591,6 +661,7 @@ export function createRewardsController(options) {
     applyRuntimeConfig,
     maybeSyncPromoTweetFromBackend,
     resetRunState,
+    startRunSession,
     queueSessionEvent,
     getRunElapsedMs,
     getRunSummary,
